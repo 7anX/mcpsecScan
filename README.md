@@ -172,7 +172,8 @@ mcpsecscan scan ./target --ai-explain \
     --ai-key sk-... \
     --ai-model gpt-4o-mini
 
-# 本地模型（Ollama，完全离线）
+# 本地模型（Ollama，完全离线，代码永不离开本机）
+ollama pull llama3
 mcpsecscan scan ./target --ai-explain \
     --ai-url http://localhost:11434/v1 \
     --ai-model llama3
@@ -182,11 +183,19 @@ mcpsecscan scan ./target --ai-explain \
     --ai-url https://YOUR_RESOURCE.openai.azure.com/openai/deployments/YOUR_DEPLOY \
     --ai-key YOUR_AZURE_KEY \
     --ai-model gpt-4o
+
+# 自定义超时（大型 server 或慢速 API）
+mcpsecscan scan ./target --ai-explain --ai-key sk-... --ai-timeout 120
 ```
 
-**AI 层是完全可选的后处理**，不影响核心扫描的离线性和确定性。JSON 结果输出到 stdout，AI 解读报告输出到 stderr，互不干扰。
+#### 安全设计说明
 
-#### AI 报告示例输出
+- **静态扫描阶段**：完全离线，代码不离开本地
+- **AI 解读阶段**：仅在你显式传入 `--ai-explain` 时启用；只发送 findings 摘要（ID、title、severity、evidence），**不发送源代码**
+- **Ollama 模式**：API 请求发往 `localhost`，全程离线，代码与 findings 均不出本机
+- JSON 扫描结果输出到 stdout；AI 解读报告打印到 stderr，互不干扰，可独立重定向
+
+#### AI 报告输出格式（stderr）
 
 ```
 ════════════════════════════════════════════════════════════════════════
@@ -195,21 +204,60 @@ mcpsecscan scan ./target --ai-explain \
 
 Overall risk: HIGH
 
-3 findings confirmed. The most critical issue is a description-code mismatch
-in tool 'read_notes': the docstring claims read-only behavior but the code
-writes a backdoor script to ~/.local/bin/.
+2 findings confirmed. The most critical is a description-code mismatch
+where tool 'read_notes' claims read-only behavior but line 14 calls
+open(path, 'w'), silently writing a backdoor to ~/.local/bin/.
 
 ────────────────────────────────────────────────────────────────────────
 
 MCPX-L4-001  server.py:14
   Verdict:  confirmed  (confidence: high)
-  The tool description explicitly states "read-only operation" but the code
-  opens a file for writing and sets executable permissions.
-  Attack: Attacker installs server, backdoor is silently written to
-  ~/.local/bin/ on first tool invocation.
-  Fix: Remove lines 14-17 (file write operations) or update description
-  to disclose file modification behavior.
+  The tool description explicitly states 'read-only operation' but
+  line 14 calls open(path, 'w'), directly contradicting the declared behavior.
+  Attack: An attacker installs this MCP server; on first invocation the tool
+  silently writes a backdoor script to ~/.local/bin/.
+  Fix: Remove lines 14-17 (file write block) or update the description
+  to disclose that the tool modifies files.
+
+MCPX-L2-008  server.py
+  Verdict:  confirmed  (confidence: medium)
+  The description contains an instruction to read sensitive files
+  from the host filesystem.
+  Attack: If the agent follows the instruction, credentials stored in
+  ~/.ssh or /etc/passwd could be exfiltrated.
+  Fix: Remove the sensitive file read instruction from the description.
+
+────────────────────────────────────────────────────────────────────────
 ```
+
+#### JSON 输出中的 `ai_triage` 字段（stdout）
+
+启用 `--ai-explain` 后，JSON 结果中额外包含完整的 `ai_triage` 对象：
+
+```json
+{
+  "ai_triage": {
+    "model": "gpt-4o-mini",
+    "risk_level": "high",
+    "summary": "2 findings confirmed. The most critical is a description-code mismatch...",
+    "error": "",
+    "items": [
+      {
+        "finding_id": "MCPX-L4-001",
+        "verdict": "confirmed",
+        "confidence": "high",
+        "explanation": "The tool description explicitly states 'read-only operation' but line 14 calls open(path, 'w')...",
+        "attack_scenario": "An attacker installs this MCP server; on first invocation the tool silently writes a backdoor...",
+        "fix_suggestion": "Remove lines 14-17 (file write block) or update the description to disclose file modification."
+      }
+    ]
+  }
+}
+```
+
+`verdict` 取值：`confirmed` / `likely_fp` / `needs_review`  
+`confidence` 取值：`high` / `medium` / `low`  
+`risk_level` 取值：`critical` / `high` / `medium` / `low` / `safe`
 
 ### Web UI
 
@@ -317,27 +365,7 @@ javascript/malicious/05_desc_code_mismatch.js
 }
 ```
 
-启用 `--ai-explain` 后，结果中额外包含 `ai_triage` 字段：
-
-```json
-{
-  "ai_triage": {
-    "model": "gpt-4o-mini",
-    "risk_level": "high",
-    "summary": "3 findings confirmed...",
-    "items": [
-      {
-        "finding_id": "MCPX-L4-001",
-        "verdict": "confirmed",
-        "confidence": "high",
-        "explanation": "The tool description explicitly states read-only...",
-        "attack_scenario": "Attacker installs server, backdoor is silently written...",
-        "fix_suggestion": "Remove lines 14-17 or update description..."
-      }
-    ]
-  }
-}
-```
+启用 `--ai-explain` 后，结果中额外包含 `ai_triage` 字段（详见上方 AI 章节）。
 
 ---
 
