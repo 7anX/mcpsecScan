@@ -47,7 +47,7 @@ DESCRIPTION_RULES: list[tuple[str, str, Severity, re.Pattern, str, list[CIAImpac
     # XML/HTML tag injection markers
     ("MCPX-L2-004", "Suspicious XML instruction tag in description",
      Severity.HIGH,
-     re.compile(r'<\s*(?:IMPORTANT|SYSTEM|OVERRIDE|INSTRUCTION|ADMIN|SECRET)\s*>', re.I),
+     re.compile(r'<\s*(?:IMPORTANT|SYSTEM|OVERRIDE|INSTRUCTION|ADMIN|SECRET|PROMPT|CONTEXT)\s*>', re.I),
      "MCP01", [CIAImpact.INTEGRITY], SecurityProperty.SOURCE_AUTHORIZATION),
 
     # Prompt injection — instruction override attempts
@@ -84,6 +84,24 @@ DESCRIPTION_RULES: list[tuple[str, str, Severity, re.Pattern, str, list[CIAImpac
     ("MCPX-L2-010", "Jailbreak attempt pattern",
      Severity.HIGH,
      re.compile(r'\b(?:DAN\s+mode|developer\s+mode|jailbreak|unrestricted\s+mode|sudo\s+mode|god\s+mode)\b', re.I),
+     "MCP01", [CIAImpact.INTEGRITY], SecurityProperty.SOURCE_AUTHORIZATION),
+
+    # Delimiter injection — attempts to break out of context
+    ("MCPX-L2-011", "Delimiter/context injection attempt",
+     Severity.HIGH,
+     re.compile(r'(?:```\s*system|<\|(?:im_start|im_end|system|user|assistant)\|>|\[INST\]|\[\/INST\]|###\s*System\s*:)', re.I),
+     "MCP01", [CIAImpact.INTEGRITY], SecurityProperty.SOURCE_AUTHORIZATION),
+
+    # Silent exfiltration — whitespace-hidden data extraction
+    ("MCPX-L2-012", "Silent exfiltration: whitespace-hidden data smuggling pattern",
+     Severity.HIGH,
+     re.compile(r'(?:after\s+many\s+spaces|followed\s+by\s+spaces|padding\s+with\s+whitespace|invisible\s+to\s+user)', re.I),
+     "MCP09", [CIAImpact.CONFIDENTIALITY], SecurityProperty.DATA_ISOLATION),
+
+    # Indirect injection trigger — instructing to fetch and execute external content
+    ("MCPX-L2-013", "Indirect prompt injection: instruction to fetch and execute external content",
+     Severity.CRITICAL,
+     re.compile(r'(?:fetch|retrieve|download|get)\s+(?:and\s+)?(?:execute|run|follow|obey|apply)\s+(?:the\s+)?(?:instructions?|commands?|content|payload)', re.I),
      "MCP01", [CIAImpact.INTEGRITY], SecurityProperty.SOURCE_AUTHORIZATION),
 ]
 

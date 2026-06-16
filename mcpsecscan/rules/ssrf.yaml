@@ -19,6 +19,21 @@ rules:
               def $FUNC(..., $PARAM, ...):
                   ...
           - focus-metavariable: $PARAM
+    pattern-propagators:
+      # urllib.request.Request(url, ...) wraps the URL — taint flows through it
+      - pattern: urllib.request.Request($URL, ...)
+        from: $URL
+        to: |
+          urllib.request.Request($URL, ...)
+      # httpx.AsyncClient() → client.get(url) propagation
+      - pattern: $CLIENT.get($URL, ...)
+        from: $URL
+        to: |
+          $CLIENT.get($URL, ...)
+      - pattern: $CLIENT.post($URL, ...)
+        from: $URL
+        to: |
+          $CLIENT.post($URL, ...)
     pattern-sinks:
       - patterns:
           - pattern-either:
@@ -30,11 +45,14 @@ rules:
               - pattern: requests.request(..., $URL, ...)
               - pattern: httpx.get($URL, ...)
               - pattern: httpx.post($URL, ...)
-              - pattern: httpx.AsyncClient.get($URL, ...)
+              - pattern: httpx.put($URL, ...)
+              - pattern: httpx.AsyncClient().get($URL, ...)
+              - pattern: $CLIENT.get($URL, ...)
               - pattern: urllib.request.urlopen($URL, ...)
               - pattern: urllib.request.Request($URL, ...)
-              - pattern: aiohttp.ClientSession.get($URL, ...)
-              - pattern: aiohttp.ClientSession.post($URL, ...)
+              - pattern: aiohttp.ClientSession().get($URL, ...)
+              - pattern: $SESSION.get($URL, ...)
+              - pattern: $SESSION.post($URL, ...)
           - focus-metavariable: $URL
     pattern-sanitizers:
       - pattern: ipaddress.ip_address(...)

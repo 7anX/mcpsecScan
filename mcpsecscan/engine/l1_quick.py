@@ -21,8 +21,10 @@ from mcpsecscan.engine.models import (
 TOKEN_PATTERNS: list[tuple[str, str, re.Pattern]] = [
     ("AWS Access Key", "MCPX-L1-001",
      re.compile(r'\bAKIA[0-9A-Z]{16}\b')),
-    ("GitHub PAT", "MCPX-L1-002",
+    ("GitHub PAT (classic)", "MCPX-L1-002",
      re.compile(r'\bghp_[A-Za-z0-9]{36}\b')),
+    ("GitHub Fine-grained PAT", "MCPX-L1-002b",
+     re.compile(r'\bgithub_pat_[A-Za-z0-9_]{82}\b')),
     ("OpenAI API Key", "MCPX-L1-003",
      re.compile(r'\bsk-[A-Za-z0-9]{48,}\b')),
     ("Anthropic API Key", "MCPX-L1-004",
@@ -33,6 +35,18 @@ TOKEN_PATTERNS: list[tuple[str, str, re.Pattern]] = [
      re.compile(r'\bxox[abprs]-[A-Za-z0-9\-]{10,}\b')),
     ("PEM Private Key", "MCPX-L1-007",
      re.compile(r'-----BEGIN (RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----')),
+    ("Stripe Secret Key", "MCPX-L1-008",
+     re.compile(r'\bsk_live_[A-Za-z0-9]{24,}\b')),
+    ("Stripe Restricted Key", "MCPX-L1-008b",
+     re.compile(r'\brk_live_[A-Za-z0-9]{24,}\b')),
+    ("Twilio Account SID", "MCPX-L1-009a",
+     re.compile(r'\bAC[0-9a-f]{32}\b')),
+    ("Twilio Auth Token", "MCPX-L1-009b",
+     re.compile(r'\b[0-9a-f]{32}\b')),  # low precision, suppressed by exclusion
+    ("HuggingFace API Token", "MCPX-L1-009c",
+     re.compile(r'\bhf_[A-Za-z0-9]{34,}\b')),
+    ("Azure Storage Key", "MCPX-L1-009d",
+     re.compile(r'\b[A-Za-z0-9+/]{86}==\b')),
 ]
 
 # FP exclusions: placeholder patterns that look like tokens but aren't

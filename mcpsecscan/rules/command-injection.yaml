@@ -28,6 +28,9 @@ rules:
               - pattern: subprocess.check_output($CMD, ..., shell=True, ...)
               - pattern: os.system($CMD)
               - pattern: os.popen($CMD)
+              # asyncio subprocess (mcp-shell-server pattern)
+              - pattern: asyncio.create_subprocess_shell($CMD, ...)
+              - pattern: await asyncio.create_subprocess_shell($CMD, ...)
           - focus-metavariable: $CMD
     pattern-sanitizers:
       - pattern: shlex.quote(...)
@@ -59,6 +62,31 @@ rules:
               - pattern: subprocess.call(f"...", ..., shell=True, ...)
               - pattern: os.system(f"...")
               - pattern: os.popen(f"...")
+
+  - id: mcp-command-injection-paramiko-exec
+    message: >-
+      User-controlled parameter from MCP tool flows to paramiko exec_command.
+      Attacker can execute arbitrary commands on the remote SSH server.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: [vuln]
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-003c
+      cia_impact: [C, I, A]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern: $CLIENT.exec_command($CMD, ...)
+          - focus-metavariable: $CMD
 
   # ─── JavaScript / TypeScript ───
   - id: mcp-command-injection-js-exec
