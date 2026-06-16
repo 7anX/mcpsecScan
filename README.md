@@ -163,7 +163,11 @@ pip install -e .
 
 > **可选：启用 L3 污点分析（需要 Semgrep）**
 > ```bash
-> pip install semgrep          # 或: pip install -e ".[taint]"
+> # 方式一：通过 extras 安装（推荐，自动锁定兼容版本）
+> pip install -e ".[taint]"
+>
+> # 方式二：单独安装
+> pip install "semgrep>=1.50"
 > ```
 > 安装后 L3 自动启用，未安装则自动跳过，不影响其他层。
 
@@ -206,7 +210,7 @@ mcpsecscan
 | 安装方式 | 包含功能 | 何时使用 |
 |---|---|---|
 | `pip install -e .` | L1 + L2 + L4 | 日常使用，零依赖 |
-| `pip install -e ".[taint]"` | + L3 Semgrep 污点分析 | 需要数据流追踪（SSRF/命令注入） |
+| `pip install -e ".[taint]"` | + L3 Semgrep 污点分析（自动安装 `semgrep>=1.50`） | 需要数据流追踪（SSRF/命令注入） |
 | `pip install -e ".[ai]"` | + AI 结果解读 | 需要 LLM 解读 findings |
 | `pip install -e ".[taint,ai]"` | 全部功能 | CI/CD 完整流水线 |
 
