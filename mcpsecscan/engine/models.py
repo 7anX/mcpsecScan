@@ -1,4 +1,4 @@
-"""Data models for mcpx scan results."""
+﻿"""Data models for mcpx scan results."""
 
 from __future__ import annotations
 

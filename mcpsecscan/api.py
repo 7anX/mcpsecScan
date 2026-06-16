@@ -1,4 +1,4 @@
-"""FastAPI application — REST API + static file serving."""
+﻿"""FastAPI application — REST API + static file serving."""
 
 from pathlib import Path
 
@@ -7,10 +7,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from mcpsec_scan import __version__
-from mcpsec_scan.engine.scanner import scan_target
+from mcpsecscan import __version__
+from mcpsecscan.engine.scanner import scan_target
 
-app = FastAPI(title="mcpsec-scan", version=__version__)
+app = FastAPI(title="mcpsecscan", version=__version__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -76,7 +76,7 @@ async def api_scan(req: ScanRequest):
 @app.get("/api/info")
 async def api_info():
     """返回扫描器信息。"""
-    from mcpsec_scan.engine.l3_taint import is_available as l3_ok, RULES_DIR
+    from mcpsecscan.engine.l3_taint import is_available as l3_ok, RULES_DIR
 
     rule_count = len(list(RULES_DIR.rglob("*.yaml"))) if RULES_DIR.exists() else 0
 

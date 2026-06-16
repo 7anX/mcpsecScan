@@ -1,4 +1,4 @@
-"""L1: Quick detection layer — fast pattern matching without deep analysis.
+﻿"""L1: Quick detection layer — fast pattern matching without deep analysis.
 
 Detects:
 - Hardcoded secrets (precise vendor token formats)
@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from mcpsec_scan.engine.models import (
+from mcpsecscan.engine.models import (
     Finding, Severity, Confidence, CIAImpact, SecurityProperty
 )
 

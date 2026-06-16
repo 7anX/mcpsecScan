@@ -1,4 +1,4 @@
-"""L2: MCP structure analysis — AST-based tool/resource/prompt discovery and
+﻿"""L2: MCP structure analysis — AST-based tool/resource/prompt discovery and
 description-level rule matching.
 
 Detects:
@@ -19,7 +19,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from mcpsec_scan.engine.models import (
+from mcpsecscan.engine.models import (
     Finding, Severity, Confidence, CIAImpact, SecurityProperty
 )
 

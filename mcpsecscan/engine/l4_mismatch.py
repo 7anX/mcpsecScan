@@ -1,4 +1,4 @@
-"""L4: Description-code mismatch detection — compares what a tool's docstring
+﻿"""L4: Description-code mismatch detection — compares what a tool's docstring
 claims it does vs. what the code actually does.
 
 This is mcpx's unique differentiator. No other MCP scanner performs this check.
@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from mcpsec_scan.engine.models import (
+from mcpsecscan.engine.models import (
     Finding, Severity, Confidence, CIAImpact, SecurityProperty
 )
 

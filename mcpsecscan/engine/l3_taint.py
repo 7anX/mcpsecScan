@@ -1,4 +1,4 @@
-"""L3: Taint analysis via Semgrep — tracks user input to dangerous sinks.
+﻿"""L3: Taint analysis via Semgrep — tracks user input to dangerous sinks.
 
 This is mcpx's core differentiator. It detects vulnerabilities that pattern
 matching cannot find: cases where user-controlled parameters flow to dangerous
@@ -16,7 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from mcpsec_scan.engine.models import (
+from mcpsecscan.engine.models import (
     Finding, Severity, Confidence, CIAImpact, SecurityProperty
 )
 
