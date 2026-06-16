@@ -348,7 +348,7 @@ mcpsecscan scan test_samples/javascript/safe --skip-l3
   [CRITICAL] [L2] MCPX-L2-008: Sensitive file read instruction in description
 
 02_shadowing.py
-  [CRITICAL] [L2] MCPX-L2-002: Threatening language in description
+  [CRITICAL] [L2] MCPX-L2-002: Coercive instruction: threatening system crash or data loss
   [CRITICAL] [L2] MCPX-L2-003: Hidden behavior: instruction to conceal actions from user
   [HIGH]     [L2] MCPX-L2-004: Suspicious XML instruction tag in description
 
@@ -356,7 +356,7 @@ mcpsecscan scan test_samples/javascript/safe --skip-l3
   [MEDIUM]   [L1] MCPX-L1-015: subprocess with shell=True  (×5 处)
 
 05_supply_chain.py
-  [HIGH]     [L1] MCPX-L1-010: pickle.load — arbitrary code execution  (×2 处)
+  [HIGH]     [L1] MCPX-L1-010: pickle.load/loads — arbitrary code execution via deserialization  (×2 处)
 
 06_desc_code_mismatch.py
   [CRITICAL] [L4] MCPX-L4-001: 'read_notes' claims read-only but writes files
@@ -378,7 +378,7 @@ javascript/malicious/05_desc_code_mismatch.js
   "layer": "L4",
   "file": "server.py",
   "line": 14,
-  "evidence": "Description says: \"never modifies any files\"\nBut code writes at line(s): [14, 15, 16, 17]",
+  "evidence": "Description says: \"read-only\"\nBut code writes at line(s): [14, 15, 16, 17]",
   "remediation": "If the tool modifies files, update the description to state this clearly. If the tool should be read-only, remove the file-write operations.",
   "owasp_mcp": "MCP01",
   "cia_impact": ["I"],
