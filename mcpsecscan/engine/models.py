@@ -79,7 +79,7 @@ class ScanResult:
     target: str
     findings: list[Finding] = field(default_factory=list)
     scan_time_ms: int = 0
-    suite_version: str = "0.1.0"
+    suite_version: str = "0.2.0"
     errors: list[str] = field(default_factory=list)
 
     @property

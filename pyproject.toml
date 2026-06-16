@@ -1,7 +1,7 @@
 [project]
 name = "mcpsecscan"
-version = "0.1.0"
-description = "MCP Server static security scanner with Web UI. Detects SSRF, path traversal, command injection, and description-code mismatches through taint analysis."
+version = "0.2.0"
+description = "MCP Server static security scanner. AST + Semgrep taint analysis + description-code mismatch detection. Optional AI triage via any OpenAI-compatible API."
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
@@ -16,7 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 taint = ["semgrep>=1.50"]
-dev = ["pytest>=7.0"]
+ai    = ["httpx>=0.27"]
+dev   = ["pytest>=7.0"]
 
 [project.scripts]
 mcpsecscan = "mcpsecscan.main:cli"
