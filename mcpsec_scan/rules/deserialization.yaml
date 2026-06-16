@@ -1,0 +1,80 @@
+rules:
+  - id: mcp-deserialization-pickle-user-input
+    message: >-
+      User-controlled parameter from MCP tool flows to pickle.load/loads.
+      Attacker can achieve arbitrary code execution via crafted pickle data.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: [vuln]
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-005
+      cia_impact: [C, I, A]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: pickle.load($X)
+              - pattern: pickle.loads($X)
+              - pattern: _pickle.load($X)
+              - pattern: _pickle.loads($X)
+          - focus-metavariable: $X
+
+  - id: mcp-deserialization-yaml-unsafe
+    message: >-
+      User-controlled parameter from MCP tool flows to yaml.load without
+      SafeLoader. Attacker can achieve arbitrary code execution.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-005b
+      cia_impact: [C, I, A]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern: yaml.load($X)
+          - pattern-not: yaml.load($X, Loader=yaml.SafeLoader)
+          - pattern-not: yaml.load($X, Loader=yaml.FullLoader)
+          - focus-metavariable: $X
+
+  - id: mcp-deserialization-marshal
+    message: >-
+      User-controlled parameter flows to marshal.loads — arbitrary code execution.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-005c
+      cia_impact: [C, I, A]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: marshal.load($X)
+              - pattern: marshal.loads($X)
+          - focus-metavariable: $X

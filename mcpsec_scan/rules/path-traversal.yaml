@@ -1,0 +1,90 @@
+rules:
+  - id: mcp-path-traversal-user-input-to-file
+    message: >-
+      User-controlled parameter from MCP tool flows to file open/read without
+      path canonicalization. Attacker can read arbitrary files (path traversal).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: [vuln]
+      owasp_mcp: MCP08
+      mcpx_id: MCPX-L3-002
+      cia_impact: [C]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: open($PATH, ...)
+              - pattern: pathlib.Path($PATH)
+              - pattern: Path($PATH)
+              - pattern: os.path.join(..., $PATH, ...)
+              - pattern: io.open($PATH, ...)
+          - focus-metavariable: $PATH
+    pattern-sanitizers:
+      - pattern: os.path.realpath(...)
+      - pattern: os.path.abspath(...)
+      - pattern: pathlib.Path(...).resolve()
+
+  - id: mcp-path-traversal-join-no-resolve
+    message: >-
+      os.path.join with user input does not prevent path traversal.
+      Missing os.path.realpath() or resolve() after join.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: [vuln]
+      owasp_mcp: MCP08
+      mcpx_id: MCPX-L3-002b
+      cia_impact: [C]
+      confidence: MEDIUM
+    patterns:
+      - pattern: |
+          $JOINED = os.path.join($BASE, $INPUT)
+          ...
+          open($JOINED, ...)
+      - pattern-not: |
+          $JOINED = os.path.join($BASE, $INPUT)
+          ...
+          $RESOLVED = os.path.realpath($JOINED)
+          ...
+          open($RESOLVED, ...)
+
+  # ─── JavaScript / TypeScript ───
+  - id: mcp-path-traversal-js-readfile
+    message: >-
+      User-controlled parameter flows to file read without path validation.
+      Attacker can read arbitrary files via path traversal.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      owasp_mcp: MCP08
+      mcpx_id: MCPX-L3-002
+      cia_impact: [C]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - pattern: |
+          const { ..., $PARAM, ...} = $REQ.params.arguments
+      - pattern: |
+          const { ..., $PARAM, ...} = request.params.arguments
+      - pattern: |
+          const { ..., $PARAM, ...} = $ARGS
+    pattern-sinks:
+      - pattern-either:
+          - pattern: fs.readFileSync($PATH, ...)
+          - pattern: fs.readFile($PATH, ...)
+          - pattern: fs.promises.readFile($PATH, ...)
+          - pattern: fs.createReadStream($PATH, ...)
+    pattern-sanitizers:
+      - pattern: path.resolve(...)
+      - pattern: path.normalize(...)

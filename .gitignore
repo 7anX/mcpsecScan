@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.eggs/
+*.egg
+.mcpsec-state.json
+test_samples/real_world/
+__pycache__/

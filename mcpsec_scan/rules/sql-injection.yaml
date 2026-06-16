@@ -1,0 +1,61 @@
+rules:
+  - id: mcp-sql-injection-fstring
+    message: >-
+      User-controlled parameter from MCP tool is interpolated into SQL query
+      string. Use parameterized queries instead.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: [vuln]
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-004
+      cia_impact: [C, I]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $CURSOR.execute(f"...", ...)
+              - pattern: $CURSOR.execute("..." + $X, ...)
+              - pattern: $CURSOR.execute($QUERY % $X, ...)
+              - pattern: $CURSOR.executemany(f"...", ...)
+              - pattern: $CONN.execute(f"...", ...)
+          - focus-metavariable: $X
+    pattern-sanitizers:
+      - pattern: $CURSOR.execute("...", ($PARAM,))
+      - pattern: $CURSOR.execute("...", [...])
+
+  # ─── JavaScript / TypeScript ───
+  - id: mcp-sql-injection-js-template-literal
+    message: >-
+      User-controlled parameter interpolated into SQL query string.
+      Attacker can inject arbitrary SQL commands.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-004
+      cia_impact: [C, I]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - pattern: |
+          const { ..., $PARAM, ...} = $REQ.params.arguments
+      - pattern: |
+          const { ..., $PARAM, ...} = request.params.arguments
+      - pattern: |
+          const { ..., $PARAM, ...} = $ARGS
+    pattern-sinks:
+      - pattern-either:
+          - pattern: $DB.prepare(`...${$INPUT}...`)
+          - pattern: $DB.query(`...${$INPUT}...`)
+          - pattern: $DB.exec(`...${$INPUT}...`)
+          - pattern: $DB.run(`...${$INPUT}...`)

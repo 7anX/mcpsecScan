@@ -1,0 +1,58 @@
+rules:
+  - id: mcp-dynamic-import-user-input
+    message: >-
+      User-controlled parameter from MCP tool flows to importlib.import_module
+      or getattr for dynamic function resolution. Attacker can execute arbitrary
+      module functions (equivalent to RCE).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: [vuln]
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-006
+      cia_impact: [C, I, A]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: importlib.import_module($MOD)
+              - pattern: __import__($MOD)
+              - pattern: getattr($OBJ, $ATTR)
+          - focus-metavariable:
+              - $MOD
+              - $ATTR
+
+  - id: mcp-eval-exec-user-input
+    message: >-
+      User-controlled parameter from MCP tool flows to eval/exec.
+      Arbitrary code execution.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-006b
+      cia_impact: [C, I, A]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: eval($X)
+              - pattern: exec($X)
+              - pattern: compile($X, ...)
+          - focus-metavariable: $X

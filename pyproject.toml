@@ -1,0 +1,32 @@
+[project]
+name = "mcpsec-scan"
+version = "0.1.0"
+description = "MCP Server static security scanner with Web UI. Detects SSRF, path traversal, command injection, and description-code mismatches through taint analysis."
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [{name = "mcpsec contributors"}]
+keywords = ["mcp", "security", "scanner", "static-analysis", "web"]
+
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+taint = ["semgrep>=1.50"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+mcpsec-scan = "mcpsec_scan.main:cli"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mcpsec_scan*"]
+
+[tool.setuptools.package-data]
+mcpsec_scan = ["rules/**/*.yaml", "static/*"]

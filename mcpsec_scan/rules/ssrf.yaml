@@ -1,0 +1,81 @@
+rules:
+  - id: mcp-ssrf-user-url-to-request
+    message: >-
+      User-controlled parameter from MCP tool flows to HTTP request without
+      URL/IP validation. An attacker can access internal services (SSRF).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      subcategory: [vuln]
+      owasp_mcp: MCP03
+      mcpx_id: MCPX-L3-001
+      cia_impact: [C]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: requests.get($URL, ...)
+              - pattern: requests.post($URL, ...)
+              - pattern: requests.put($URL, ...)
+              - pattern: requests.delete($URL, ...)
+              - pattern: requests.head($URL, ...)
+              - pattern: requests.request(..., $URL, ...)
+              - pattern: httpx.get($URL, ...)
+              - pattern: httpx.post($URL, ...)
+              - pattern: httpx.AsyncClient.get($URL, ...)
+              - pattern: urllib.request.urlopen($URL, ...)
+              - pattern: urllib.request.Request($URL, ...)
+              - pattern: aiohttp.ClientSession.get($URL, ...)
+              - pattern: aiohttp.ClientSession.post($URL, ...)
+          - focus-metavariable: $URL
+    pattern-sanitizers:
+      - pattern: ipaddress.ip_address(...)
+      - pattern: ipaddress.ip_network(...)
+      - pattern: validators.url(...)
+      - pattern: urllib.parse.urlparse(...)
+
+  # ─── JavaScript / TypeScript ───
+  - id: mcp-ssrf-js-user-url-to-fetch
+    message: >-
+      User-controlled parameter flows to fetch/axios/http request without
+      URL validation. Attacker can access internal services (SSRF).
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      owasp_mcp: MCP03
+      mcpx_id: MCPX-L3-001
+      cia_impact: [C]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - pattern: |
+          const { ..., $PARAM, ...} = $REQ.params.arguments
+      - pattern: |
+          const { ..., $PARAM, ...} = request.params.arguments
+      - pattern: |
+          const { ..., $PARAM, ...} = $ARGS
+    pattern-sinks:
+      - pattern-either:
+          - pattern: fetch($URL, ...)
+          - pattern: axios.get($URL, ...)
+          - pattern: axios.post($URL, ...)
+          - pattern: axios.put($URL, ...)
+          - pattern: axios.request({url: $URL, ...})
+          - pattern: axios($URL, ...)
+          - pattern: got($URL, ...)
+          - pattern: got.get($URL, ...)
+          - pattern: node-fetch($URL, ...)
+          - pattern: undici.fetch($URL, ...)
+          - pattern: http.get($URL, ...)
+          - pattern: http.request($URL, ...)
+          - pattern: https.get($URL, ...)
+          - pattern: https.request($URL, ...)

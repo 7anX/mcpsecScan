@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mcpsec-scan</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen" x-data="scanApp()">
+
+  <!-- Header -->
+  <header class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+    <div class="flex items-center justify-between max-w-7xl mx-auto">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center font-bold text-sm">MS</div>
+        <h1 class="text-xl font-bold">mcpsec-scan</h1>
+        <span class="text-xs bg-gray-700 px-2 py-0.5 rounded" x-text="'v' + info.version"></span>
+      </div>
+      <div class="flex items-center gap-4">
+        <span class="text-sm text-gray-400" x-text="t('subtitle')"></span>
+        <!-- Language Switch -->
+        <button @click="toggleLang()"
+                class="text-xs bg-gray-700 hover:bg-gray-600 px-2.5 py-1 rounded transition">
+          <span x-text="lang === 'en' ? 'CN' : 'EN'"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto p-6 flex gap-6 flex-col lg:flex-row">
+
+    <!-- Left Panel: Input -->
+    <div class="lg:w-[30%] w-full space-y-4">
+      <div class="bg-gray-800 rounded-lg p-5 border border-gray-700">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-4" x-text="t('scanTarget')"></h2>
+
+        <label class="block text-sm text-gray-400 mb-1" x-text="t('sourcePath')"></label>
+        <input type="text" x-model="target"
+               :placeholder="t('pathPlaceholder')"
+               class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm focus:border-green-500 focus:outline-none"
+               @keydown.enter="runScan()">
+
+        <div class="mt-4">
+          <label class="block text-sm text-gray-400 mb-2" x-text="t('layers')"></label>
+          <div class="space-y-1">
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" x-model="layers.l1" class="rounded">
+              <span x-text="'L1 - ' + t('l1Name')"></span>
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" x-model="layers.l2" class="rounded">
+              <span x-text="'L2 - ' + t('l2Name')"></span>
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" x-model="layers.l3" class="rounded">
+              <span x-text="'L3 - ' + t('l3Name')"></span>
+              <span x-show="!info.layers?.l3?.available" class="text-xs text-yellow-500" x-text="t('semgrepRequired')"></span>
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" x-model="layers.l4" class="rounded">
+              <span x-text="'L4 - ' + t('l4Name')"></span>
+            </label>
+          </div>
+        </div>
+
+        <button @click="runScan()"
+                :disabled="scanning || !target.trim()"
+                class="mt-5 w-full bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded transition">
+          <span x-show="!scanning" x-text="t('scanBtn')"></span>
+          <span x-show="scanning" class="flex items-center justify-center gap-2">
+            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+            <span x-text="t('scanning')"></span>
+          </span>
+        </button>
+      </div>
+
+      <!-- Info Panel -->
+      <div class="bg-gray-800 rounded-lg p-5 border border-gray-700">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3" x-text="t('status')"></h2>
+        <div class="space-y-1 text-xs text-gray-400">
+          <template x-for="(layer, key) in info.layers" :key="key">
+            <div class="flex justify-between">
+              <span x-text="key.toUpperCase() + ' ' + layer.name"></span>
+              <span :class="layer.available ? 'text-green-400' : 'text-yellow-500'" x-text="layer.available ? t('ready') : t('na')"></span>
+            </div>
+          </template>
+          <div class="flex justify-between pt-2 border-t border-gray-700 mt-2">
+            <span x-text="t('rules')"></span>
+            <span class="text-green-400" x-text="info.rules_count + t('filesUnit')"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Panel: Results -->
+    <div class="lg:w-[70%] w-full">
+      <div class="bg-gray-800 rounded-lg border border-gray-700 min-h-[500px]">
+
+        <!-- Empty State -->
+        <div x-show="!result && !scanning && !error" class="flex items-center justify-center h-[500px] text-gray-500">
+          <div class="text-center">
+            <svg class="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            <p x-text="t('emptyState')"></p>
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div x-show="error" x-cloak class="p-5">
+          <div class="bg-red-900/30 border border-red-700 rounded p-4 text-red-300 text-sm" x-text="error"></div>
+        </div>
+
+        <!-- Results -->
+        <div x-show="result" x-cloak class="p-5 space-y-4">
+          <!-- Summary -->
+          <div class="flex items-center gap-3 flex-wrap">
+            <template x-for="sev in ['critical','high','medium','low']">
+              <span x-show="result?.summary?.[sev]"
+                    :class="{
+                      'bg-red-600': sev==='critical',
+                      'bg-orange-600': sev==='high',
+                      'bg-yellow-600': sev==='medium',
+                      'bg-blue-600': sev==='low'
+                    }"
+                    class="px-2.5 py-0.5 rounded text-xs font-medium text-white">
+                <span x-text="result.summary[sev]"></span> <span x-text="t('sev_' + sev)"></span>
+              </span>
+            </template>
+            <span class="text-xs text-gray-500 ml-auto" x-text="t('scanTime') + ': ' + result?.scan_time_ms + 'ms'"></span>
+          </div>
+
+          <!-- No findings -->
+          <div x-show="result?.total_findings === 0" class="text-center py-10 text-green-400">
+            <svg class="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            <p class="font-medium" x-text="t('noIssues')"></p>
+          </div>
+
+          <!-- Findings List -->
+          <div class="space-y-3" x-show="result?.total_findings > 0">
+            <template x-for="(f, idx) in result.findings" :key="idx">
+              <div class="bg-gray-900 rounded-lg p-4 border border-gray-700">
+                <div class="flex items-start gap-3">
+                  <span :class="{
+                    'bg-red-600': f.severity==='critical',
+                    'bg-orange-600': f.severity==='high',
+                    'bg-yellow-600': f.severity==='medium',
+                    'bg-blue-600': f.severity==='low'
+                  }" class="px-2 py-0.5 rounded text-xs font-medium text-white uppercase shrink-0" x-text="t('sev_' + f.severity)"></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-gray-100" x-text="f.title"></p>
+                    <div class="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                      <span x-text="f.file + ':' + f.line"></span>
+                      <span class="bg-gray-700 px-1.5 py-0.5 rounded" x-text="f.layer"></span>
+                      <span x-show="f.owasp_mcp" class="text-blue-400" x-text="f.owasp_mcp"></span>
+                    </div>
+                    <div x-show="f.evidence" class="mt-2 text-xs text-gray-500 bg-gray-800 p-2 rounded font-mono break-all" x-text="f.evidence"></div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Errors -->
+          <template x-for="err in result?.errors || []">
+            <div class="text-xs text-yellow-500 bg-yellow-900/20 p-2 rounded" x-text="err"></div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function scanApp() {
+      return {
+        target: '',
+        layers: { l1: true, l2: true, l3: true, l4: true },
+        scanning: false,
+        result: null,
+        error: null,
+        info: { version: '...', layers: {}, rules_count: 0 },
+        lang: localStorage.getItem('mcpsec-lang') || 'zh',
+
+        i18n: {
+          en: {
+            subtitle: 'MCP Server Static Security Scanner',
+            scanTarget: 'Scan Target',
+            sourcePath: 'Source Path',
+            pathPlaceholder: '/path/to/mcp-server or file.py',
+            layers: 'Detection Layers',
+            l1Name: 'Quick Detection',
+            l2Name: 'MCP Structure',
+            l3Name: 'Taint Analysis',
+            l4Name: 'Desc-Code Mismatch',
+            semgrepRequired: '(semgrep required)',
+            scanBtn: 'Scan',
+            scanning: 'Scanning...',
+            status: 'Status',
+            ready: 'Ready',
+            na: 'N/A',
+            rules: 'Rules',
+            filesUnit: ' files',
+            emptyState: 'Enter a path and click Scan to start',
+            noIssues: 'No security issues found',
+            scanTime: 'Time',
+            sev_critical: 'critical',
+            sev_high: 'high',
+            sev_medium: 'medium',
+            sev_low: 'low',
+          },
+          zh: {
+            subtitle: 'MCP Server 静态安全扫描器',
+            scanTarget: '扫描目标',
+            sourcePath: '源码路径',
+            pathPlaceholder: '输入目录或文件路径，如 ./my-server/',
+            layers: '检测层',
+            l1Name: '快速检测',
+            l2Name: 'MCP 结构分析',
+            l3Name: '污点分析',
+            l4Name: '描述-代码一致性',
+            semgrepRequired: '(需安装 semgrep)',
+            scanBtn: '开始扫描',
+            scanning: '扫描中...',
+            status: '状态',
+            ready: '就绪',
+            na: '不可用',
+            rules: '规则数',
+            filesUnit: ' 个文件',
+            emptyState: '输入路径后点击"开始扫描"',
+            noIssues: '未发现安全问题',
+            scanTime: '耗时',
+            sev_critical: '严重',
+            sev_high: '高危',
+            sev_medium: '中危',
+            sev_low: '低危',
+          }
+        },
+
+        t(key) {
+          return this.i18n[this.lang]?.[key] || this.i18n['en'][key] || key;
+        },
+
+        toggleLang() {
+          this.lang = this.lang === 'en' ? 'zh' : 'en';
+          localStorage.setItem('mcpsec-lang', this.lang);
+        },
+
+        async init() {
+          try {
+            const resp = await fetch('/api/info');
+            this.info = await resp.json();
+          } catch(e) { console.error(e); }
+        },
+
+        async runScan() {
+          if (!this.target.trim() || this.scanning) return;
+          this.scanning = true;
+          this.result = null;
+          this.error = null;
+
+          const skip = [];
+          if (!this.layers.l1) skip.push('l1');
+          if (!this.layers.l2) skip.push('l2');
+          if (!this.layers.l3) skip.push('l3');
+          if (!this.layers.l4) skip.push('l4');
+
+          try {
+            const resp = await fetch('/api/scan', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ target: this.target.trim(), skip })
+            });
+            if (!resp.ok) {
+              const err = await resp.json();
+              this.error = err.detail || err.error || `HTTP ${resp.status}`;
+            } else {
+              this.result = await resp.json();
+            }
+          } catch(e) {
+            this.error = this.lang === 'zh' ? '连接失败: ' + e.message : 'Connection failed: ' + e.message;
+          } finally {
+            this.scanning = false;
+          }
+        }
+      }
+    }
+  </script>
+</body>
+</html>

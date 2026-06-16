@@ -1,0 +1,83 @@
+rules:
+  - id: mcp-ssti-user-input-to-template
+    message: >-
+      User-controlled parameter from MCP tool flows to template rendering
+      (Jinja2/Mako/Django). Attacker can achieve Server-Side Template Injection (SSTI → RCE).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-007
+      cia_impact: [C, I, A]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: Template($TMPL)
+              - pattern: jinja2.Template($TMPL)
+              - pattern: Environment(...).from_string($TMPL)
+              - pattern: MakoTemplate($TMPL)
+          - focus-metavariable: $TMPL
+
+  - id: mcp-redos-user-input-to-regex
+    message: >-
+      User-controlled parameter from MCP tool flows to regex compilation.
+      Attacker can cause catastrophic backtracking (ReDoS) with crafted patterns.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      owasp_mcp: MCP09
+      mcpx_id: MCPX-L3-008
+      cia_impact: [A]
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern: |
+              def $FUNC(..., $PARAM, ...):
+                  ...
+          - focus-metavariable: $PARAM
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: re.compile($PAT)
+              - pattern: re.search($PAT, ...)
+              - pattern: re.match($PAT, ...)
+              - pattern: re.findall($PAT, ...)
+              - pattern: re.sub($PAT, ...)
+          - focus-metavariable: $PAT
+
+  - id: mcp-sensitive-data-to-log
+    message: >-
+      Sensitive parameter (password/token/secret) from MCP tool is written to
+      log output. Credentials may be exposed in log files.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      owasp_mcp: MCP04
+      mcpx_id: MCPX-L3-009
+      cia_impact: [C]
+      confidence: HIGH
+    patterns:
+      - pattern-either:
+          - pattern: |
+              def $FUNC(..., $PASS, ...):
+                  ...
+                  $LOG.$METHOD(f"...{$PASS}...")
+          - pattern: |
+              def $FUNC(..., $PASS, ...):
+                  ...
+                  logging.$METHOD(f"...{$PASS}...")
+      - metavariable-regex:
+          metavariable: $PASS
+          regex: "(?i)(password|passwd|secret|token|api_key|credential)"
