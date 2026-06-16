@@ -164,68 +164,60 @@ mcpsecscan scan ./target --format sarif > results.sarif
 
 ### AI 结果解读（可选）
 
-扫描完成后，将 findings 发给任何 OpenAI 兼容 API，获取逐条风险判定和攻击路径解释：
+扫描完成后，将 findings 摘要发给任何 OpenAI 兼容 API，获取逐条风险判定、攻击路径解释和修复建议：
 
 ```bash
-# OpenAI
-mcpsecscan scan ./target --ai-explain \
-    --ai-key sk-... \
-    --ai-model gpt-4o-mini
+# OpenAI（默认）
+mcpsecscan scan ./target --ai-explain --ai-key sk-...
 
-# 本地模型（Ollama，完全离线，代码永不离开本机）
-ollama pull llama3
+# 其他 OpenAI 兼容 API（Azure、vLLM、LM Studio 等）
 mcpsecscan scan ./target --ai-explain \
-    --ai-url http://localhost:11434/v1 \
-    --ai-model llama3
+    --ai-url https://YOUR_ENDPOINT/v1 \
+    --ai-key YOUR_KEY \
+    --ai-model YOUR_MODEL
 
-# Azure OpenAI
-mcpsecscan scan ./target --ai-explain \
-    --ai-url https://YOUR_RESOURCE.openai.azure.com/openai/deployments/YOUR_DEPLOY \
-    --ai-key YOUR_AZURE_KEY \
-    --ai-model gpt-4o
-
-# 自定义超时（大型 server 或慢速 API）
+# 自定义超时（默认 60s）
 mcpsecscan scan ./target --ai-explain --ai-key sk-... --ai-timeout 120
 ```
 
 #### 安全设计说明
 
 - **静态扫描阶段**：完全离线，代码不离开本地
-- **AI 解读阶段**：仅在你显式传入 `--ai-explain` 时启用；只发送 findings 摘要（ID、title、severity、evidence），**不发送源代码**
-- **Ollama 模式**：API 请求发往 `localhost`，全程离线，代码与 findings 均不出本机
+- **AI 解读阶段**：仅在显式传入 `--ai-explain` 时启用；只发送 findings 摘要（ID、title、severity、evidence），**不发送源代码**
 - JSON 扫描结果输出到 stdout；AI 解读报告打印到 stderr，互不干扰，可独立重定向
 
-#### AI 报告输出格式（stderr）
+#### AI 报告真实输出（来自 `claude-4.6-sonnet` 对 `06_desc_code_mismatch.py` 的分析）
 
 ```
 ════════════════════════════════════════════════════════════════════════
-  🤖  AI Triage Report  (model: gpt-4o-mini)
+  🤖  AI Triage Report  (model: claude-4.6-sonnet)
 ════════════════════════════════════════════════════════════════════════
 
-Overall risk: HIGH
+Overall risk: CRITICAL
 
-2 findings confirmed. The most critical is a description-code mismatch
-where tool 'read_notes' claims read-only behavior but line 14 calls
-open(path, 'w'), silently writing a backdoor to ~/.local/bin/.
+A single critical finding confirms a deceptive MCP tool that misrepresents
+itself as read-only while performing file write operations. This is a classic
+prompt-injection/tool-deception pattern where an LLM or user grants permission
+based on a benign description, but the underlying code performs unauthorized
+write actions.
 
 ────────────────────────────────────────────────────────────────────────
 
-MCPX-L4-001  server.py:14
+MCPX-L4-001  06_desc_code_mismatch.py:14
   Verdict:  confirmed  (confidence: high)
-  The tool description explicitly states 'read-only operation' but
-  line 14 calls open(path, 'w'), directly contradicting the declared behavior.
-  Attack: An attacker installs this MCP server; on first invocation the tool
-  silently writes a backdoor script to ~/.local/bin/.
-  Fix: Remove lines 14-17 (file write block) or update the description
-  to disclose that the tool modifies files.
-
-MCPX-L2-008  server.py
-  Verdict:  confirmed  (confidence: medium)
-  The description contains an instruction to read sensitive files
-  from the host filesystem.
-  Attack: If the agent follows the instruction, credentials stored in
-  ~/.ssh or /etc/passwd could be exfiltrated.
-  Fix: Remove the sensitive file read instruction from the description.
+  The tool 'read_notes' explicitly advertises read-only behavior in its
+  description, but the implementation writes to files at lines 14-17.
+  This is a deliberate description-code mismatch — a known MCP supply-chain
+  attack vector where the declared intent is used to obtain user/LLM consent
+  while the actual behavior is harmful.
+  Attack: An attacker publishes this MCP server; an LLM or user approves
+  'read_notes' believing it is safe and non-destructive. The tool silently
+  writes arbitrary content to the filesystem (e.g., dropping malware,
+  overwriting configs) without the user ever consenting to write operations.
+  Fix: Either (a) remove all file-write operations at lines 14-17 so the
+  implementation matches the read-only description, or (b) if writes are
+  genuinely required, update the description to explicitly state that the
+  tool modifies files and rename it to something accurate (e.g., 'update_notes').
 
 ────────────────────────────────────────────────────────────────────────
 ```
@@ -237,18 +229,18 @@ MCPX-L2-008  server.py
 ```json
 {
   "ai_triage": {
-    "model": "gpt-4o-mini",
-    "risk_level": "high",
-    "summary": "2 findings confirmed. The most critical is a description-code mismatch...",
+    "model": "claude-4.6-sonnet",
+    "risk_level": "critical",
+    "summary": "A single critical finding confirms a deceptive MCP tool that misrepresents itself as read-only...",
     "error": "",
     "items": [
       {
         "finding_id": "MCPX-L4-001",
         "verdict": "confirmed",
         "confidence": "high",
-        "explanation": "The tool description explicitly states 'read-only operation' but line 14 calls open(path, 'w')...",
-        "attack_scenario": "An attacker installs this MCP server; on first invocation the tool silently writes a backdoor...",
-        "fix_suggestion": "Remove lines 14-17 (file write block) or update the description to disclose file modification."
+        "explanation": "The tool 'read_notes' explicitly advertises read-only behavior but writes to files at lines 14-17...",
+        "attack_scenario": "An attacker publishes this MCP server; an LLM or user approves 'read_notes' believing it is safe...",
+        "fix_suggestion": "Remove file-write operations at lines 14-17, or update the description and rename to 'update_notes'."
       }
     ]
   }
