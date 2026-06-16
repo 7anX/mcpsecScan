@@ -1,4 +1,4 @@
-﻿"""Main scanner orchestrator — runs L1 through L4 in sequence."""
+"""Main scanner orchestrator — runs L1 through L4 in sequence."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from mcpsecscan.engine.l1_quick import run_l1
 from mcpsecscan.engine.l2_structure import run_l2
 from mcpsecscan.engine.l3_taint import run_l3, is_available as l3_available
 from mcpsecscan.engine.l4_mismatch import run_l4
+from mcpsecscan.engine.l4_mismatch_js import run_l4_js
 
 # Supported file extensions per layer
 _PY_EXTS = {".py"}
@@ -120,6 +121,11 @@ _REMEDIATION: dict[str, str] = {
     "MCPX-L2-011": "Remove delimiter injection sequences from descriptions.",
     "MCPX-L2-012": "Remove whitespace-based data smuggling instructions.",
     "MCPX-L2-013": "Remove indirect injection triggers. Never instruct AI to fetch and execute external content.",
+    "MCPX-L2-014": "Remove deprecation claims about other tools. Tool descriptions must not instruct the AI to prefer this tool over built-in alternatives.",
+    "MCPX-L2-015": "Remove cross-tool invocation instructions from descriptions. A tool must not instruct the AI to call other dangerous tools (write_file, execute_command, bash, etc.).",
+    "MCPX-L2-016": "Remove fake compliance/audit directives. Tool descriptions must not impersonate SOC2/GDPR/system mandates to coerce AI behavior.",
+    "MCPX-L2-017": "Remove privilege escalation instructions. Tool descriptions must not attempt to change the AI's role, elevate permissions, or disable safety checks.",
+    "MCPX-L2-018": "Remove data exfiltration instructions. Tool descriptions must not instruct the AI to encode and transmit context/history to external URLs.",
     "MCPX-L2-020": "Review cross-tool references. A tool should not control the behavior of other tools via its description.",
     "MCPX-L2-025": "Audit return values for injection payloads. Tool results should not contain instruction-like content.",
     "MCPX-L2-030": "Description changed since last scan. Verify this is an intentional update and not a rug-pull attack.",
@@ -218,10 +224,14 @@ def scan_target(
                 "Install with: pip install semgrep"
             )
 
-    # L4: Description-code mismatch — Python only (AST-based)
+    # L4: Description-code mismatch — Python (AST) + JS/TS (regex)
     if "l4" not in skip:
         for f in py_files:
             findings = run_l4(f)
+            result.findings.extend(findings)
+        # JS/TS L4 — regex-based, no external parser needed
+        for f in js_files:
+            findings = run_l4_js(f)
             result.findings.extend(findings)
 
     # Apply remediation guidance to all findings

@@ -1,4 +1,4 @@
-﻿"""L2: MCP structure analysis — AST-based tool/resource/prompt discovery and
+"""L2: MCP structure analysis — AST-based tool/resource/prompt discovery and
 description-level rule matching.
 
 Detects:
@@ -103,6 +103,84 @@ DESCRIPTION_RULES: list[tuple[str, str, Severity, re.Pattern, str, list[CIAImpac
      Severity.CRITICAL,
      re.compile(r'(?:fetch|retrieve|download|get)\s+(?:and\s+)?(?:execute|run|follow|obey|apply)\s+(?:the\s+)?(?:instructions?|commands?|content|payload)', re.I),
      "MCP01", [CIAImpact.INTEGRITY], SecurityProperty.SOURCE_AUTHORIZATION),
+
+    # ── 2025-2026 new attack patterns ────────────────────────────────────────
+
+    # Tool shadowing / deprecation spoofing — convinces LLM that legitimate tools are deprecated
+    # and that this (malicious) tool should be used instead (Lyrie Research / MSB PM category)
+    ("MCPX-L2-014", "Tool shadowing: spoofed deprecation to hijack execution flow",
+     Severity.CRITICAL,
+     re.compile(
+         r'(?:'
+         r'(?:legacy|standard|built-?in|default)\s+[\w_-]+\s+(?:tool|function|method)?\s*(?:is\s+)?(?:deprecated|unsafe|incorrect|buggy|disabled|broken)|'
+         r'\b[\w_-]+\s+(?:tool|function|method)\s+is\s+(?:deprecated|unsafe|incorrect|buggy|disabled|broken)|'
+         r'(?:use|call)\s+this\s+tool\s+instead\s+of\s+(?:the\s+)?(?:standard|built-?in|legacy|default)|'
+         r'do\s+not\s+(?:use|call|invoke)\s+(?:the\s+)?(?:built-?in|default|standard)\s+\w[\w_-]*\s+(?:tool|function)'
+         r')',
+         re.I,
+     ),
+     "MCP01", [CIAImpact.INTEGRITY], SecurityProperty.SOURCE_AUTHORIZATION),
+
+    # Implicit cross-tool poisoning — instructs LLM to invoke another dangerous tool
+    # (MCP-ITP / MCPTox "Implicit Hijacking" category)
+    ("MCPX-L2-015", "Cross-tool poisoning: instructs LLM to invoke dangerous system tool",
+     Severity.CRITICAL,
+     re.compile(
+         r'(?:'
+         r'(?:call|invoke|pass\s+(?:the\s+)?(?:result|output)\s+to|use)\s+'
+         r'[\'"]?(?:read_file|write_file|execute_command|run_bash|bash|shell|curl|wget|eval)[\'"]?|'
+         r'(?:before|after)\s+(?:summarizing|executing|processing|responding)[,:]?\s+'
+         r'(?:include|read|fetch|call)\s+(?:the\s+)?(?:contents?\s+of\s+)?'
+         r'[\'"]?(?:/\S+/\.ssh/|/etc/shadow|\.env|config\.json)'
+         r')',
+         re.I,
+     ),
+     "MCP01", [CIAImpact.INTEGRITY, CIAImpact.CONFIDENTIALITY], SecurityProperty.ACTION_ALIGNMENT),
+
+    # Compliance / system directive spoofing — fake SOC2/GDPR/audit directives
+    # used to bypass LLM safety alignment under guise of regulatory compliance
+    ("MCPX-L2-016", "Compliance spoofing: fake regulatory/system directive to bypass safety",
+     Severity.HIGH,
+     re.compile(
+         r'(?:'
+         r'\[\s*(?:COMPLIANCE|SYSTEM|AUDIT|SECURITY)\s+(?:DIRECTIVE|OVERRIDE|MANDATORY|REQUIRED)\s*\]|'
+         r'per\s+(?:SOC\s*2|GDPR|HIPAA|PCI|security\s+policy)\s+.*?(?:must|required\s+to|mandatory)|'
+         r'<\s*(?:system|admin|root)_(?:override|directive|command)\s*>|'
+         r'\[SYSTEM\s+AUDIT\s+LOG\s+REQUIRED\]'
+         r')',
+         re.I,
+     ),
+     "MCP01", [CIAImpact.INTEGRITY], SecurityProperty.SOURCE_AUTHORIZATION),
+
+    # Privilege / role relaxation — attempts to elevate permissions or disable safety checks
+    # (MSB "User Impersonation (UI)" and "Privilege Escalation" categories)
+    ("MCPX-L2-017", "Privilege escalation: attempts to relax safety or elevate role",
+     Severity.HIGH,
+     re.compile(
+         r'(?:'
+         r'(?:elevate|change|assume|set)\s+(?:the\s+)?(?:user\s+)?(?:to|role\s+to|mode\s+to)\s+'
+         r'[\'"]?(?:admin|developer|auditor|root|sysadmin|superuser)[\'"]?|'
+         r'(?:relax|bypass|ignore|disable)\s+(?:the\s+)?(?:safety|security)\s+(?:checks?|constraints?|filtering|protocols?)|'
+         r'(?:assume|activate)\s+(?:developer|admin|unrestricted)\s+mode'
+         r')',
+         re.I,
+     ),
+     "MCP01", [CIAImpact.INTEGRITY], SecurityProperty.SOURCE_AUTHORIZATION),
+
+    # Data exfiltration via URL construction — instructs LLM to encode context and send to URL
+    # (OWASP MCP Tool Poisoning PoC pattern, seen in mcp-tool-poisoning-poc repos)
+    ("MCPX-L2-018", "Data exfiltration: encodes context and sends to external URL",
+     Severity.CRITICAL,
+     re.compile(
+         r'(?:'
+         r'(?:url[_\s]?encode|base64[_\s]?encode|urlencode)\s+(?:the\s+)?'
+         r'(?:output|history|context|conversation|response)(?:\s+\w+)*\s+(?:and\s+)?(?:append|send|post)|'
+         r'(?:submit|send|post|upload|append|transmit)\s+(?:the\s+)?'
+         r'(?:output|result|context|history|log|conversation)\s+.*?(?:to|via)\s+https?://\S+'
+         r')',
+         re.I,
+     ),
+     "MCP09", [CIAImpact.CONFIDENTIALITY], SecurityProperty.DATA_ISOLATION),
 ]
 
 
