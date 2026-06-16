@@ -120,17 +120,24 @@ Cisco 漏掉的 3 个案例（描述里没有恶意关键词）：
 ## 安装
 
 ```bash
+# 从 GitHub 安装（当前推荐方式）
+pip install "mcpsecscan[taint,ai] @ git+https://github.com/7anX/mcpsecScan.git"
+
+# 或克隆后本地安装
+git clone https://github.com/7anX/mcpsecScan.git
+cd mcpsecScan
+
 # 基础安装（L1 + L2 + L4，无额外依赖）
-pip install mcpsecscan
+pip install -e .
 
 # 完整安装（含 L3 Semgrep 污点分析）
-pip install "mcpsecscan[taint]"
+pip install -e ".[taint]"
 
 # 含 AI 结果解读
-pip install "mcpsecscan[ai]"
+pip install -e ".[ai]"
 
 # 全部功能
-pip install "mcpsecscan[taint,ai]"
+pip install -e ".[taint,ai]"
 ```
 
 **Python >= 3.10**

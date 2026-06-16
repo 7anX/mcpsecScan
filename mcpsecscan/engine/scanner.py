@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mcpsecscan.engine.models import ScanResult, Severity, Confidence
-from mcpsecscan.engine.l1_quick import run_l1
+from mcpsecscan.engine.l1_quick import run_l1, run_l1_js
 from mcpsecscan.engine.l2_structure import run_l2
 from mcpsecscan.engine.l3_taint import run_l3, is_available as l3_available
 from mcpsecscan.engine.l4_mismatch import run_l4
@@ -16,73 +16,7 @@ _PY_EXTS = {".py"}
 _JS_EXTS = {".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx"}
 _ALL_EXTS = _PY_EXTS | _JS_EXTS
 
-
-def scan_target(
-    target: str,
-    skip_layers: set[str] | None = None,
-    state_file: str | None = None,
-) -> ScanResult:
-    """Run all enabled layers on the target and aggregate results.
-
-    Supports Python (.py) and JavaScript/TypeScript (.js/.ts/.jsx/.tsx) files.
-    L1/L2/L4 work on Python files; L3 (Semgrep) works on both Python and JS/TS.
-    """
-    skip = skip_layers or set()
-    result = ScanResult(target=target)
-
-    target_path = Path(target)
-
-    # Collect files by language
-    if target_path.is_file():
-        all_files = [target_path]
-    else:
-        all_files = sorted(
-            f for f in target_path.rglob("*")
-            if f.suffix in _ALL_EXTS and f.is_file()
-        )
-
-    py_files = [f for f in all_files if f.suffix in _PY_EXTS]
-    js_files = [f for f in all_files if f.suffix in _JS_EXTS]
-
-    if not all_files:
-        result.errors.append(
-            f"No supported files found in {target}. "
-            f"Supported: {', '.join(sorted(_ALL_EXTS))}"
-        )
-        return result
-
-    # L1: Quick detection — Python only (AST + regex)
-    if "l1" not in skip:
-        for f in py_files:
-            findings = run_l1(f)
-            result.findings.extend(findings)
-
-    # L2: MCP structure analysis — Python only (AST-based)
-    if "l2" not in skip:
-        for f in py_files:
-            findings = run_l2(f, state_file=state_file)
-            result.findings.extend(findings)
-
-    # L3: Taint analysis via Semgrep — Python + JS/TS
-    if "l3" not in skip:
-        if l3_available():
-            # Semgrep scans all supported languages in one pass
-            findings = run_l3(target_path)
-            result.findings.extend(findings)
-        else:
-            result.errors.append(
-                "L3 skipped: semgrep not installed. "
-                "Install with: pip install semgrep"
-            )
-
-    # L4: Description-code mismatch — Python only (AST-based)
-    if "l4" not in skip:
-        for f in py_files:
-            findings = run_l4(f)
-            result.findings.extend(findings)
-
 # ─── Remediation guidance ─────────────────────────────────────────────────────
-# Maps finding ID prefix → actionable fix advice.
 _REMEDIATION: dict[str, str] = {
     # L1
     "MCPX-L1-001": "Rotate the AWS key immediately. Use IAM roles or environment variables; never hardcode credentials.",
@@ -97,13 +31,13 @@ _REMEDIATION: dict[str, str] = {
     "MCPX-L1-010": "Replace pickle with a safe serialization format (json, msgpack). If pickle is required, validate the source path and restrict it to a trusted directory.",
     "MCPX-L1-011": "Use yaml.safe_load() instead of yaml.load() to prevent arbitrary code execution.",
     "MCPX-L1-012": "Replace marshal with json or a safer serialization library.",
-    "MCPX-L1-013": "Avoid eval() with user input. Use ast.literal_eval() for safe evaluation of Python literals.",
-    "MCPX-L1-014": "Avoid exec() with user input. Refactor to use explicit function dispatch.",
-    "MCPX-L1-015": "Avoid shell=True with user input. Pass arguments as a list to subprocess.run(). Use shlex.quote() if shell string is unavoidable.",
+    "MCPX-L1-013": "Avoid eval() with user input. Use ast.literal_eval() for safe evaluation of Python literals, or a dedicated expression parser for JS.",
+    "MCPX-L1-014": "Avoid exec()/new Function() with user input. Refactor to use explicit function dispatch.",
+    "MCPX-L1-015": "Avoid shell=True / exec() with user input. Pass arguments as a list; use shlex.quote() if a shell string is unavoidable.",
     "MCPX-L1-016": "Replace os.system() with subprocess.run() with a list of arguments.",
     "MCPX-L1-017": "Do not monkey-patch builtins. This pattern is used by malicious code to intercept standard library calls.",
     "MCPX-L1-018": "Remove sys.settrace() — it intercepts all function calls globally and is a common malware technique.",
-    "MCPX-L1-019": "Do not modify __doc__ at runtime — this enables rug-pull attacks where the description changes after installation.",
+    "MCPX-L1-019": "Do not modify __doc__/description at runtime — this enables rug-pull attacks where the description changes after installation.",
     "MCPX-L1-020": "Audit the file for hidden instructions encoded in zero-width characters. Remove all U+200B–U+200D and similar codepoints.",
     "MCPX-L1-021": "Remove RTL/LTR override characters (U+202E etc.) — they can visually mislead code reviewers.",
     "MCPX-L1-022": "Remove Unicode tag/variation selector characters — they are used to encode hidden payloads.",
@@ -157,10 +91,9 @@ def _apply_remediation(findings: list) -> None:
     for f in findings:
         if f.remediation:
             continue
-        # Exact match first, then prefix match
         remedy = _REMEDIATION.get(f.id)
         if not remedy:
-            # Try prefix (e.g. MCPX-L3-003b → MCPX-L3-003)
+            # prefix match: MCPX-L3-003b → MCPX-L3-003
             prefix = f.id.rstrip("abcdefghijklmnopqrstuvwxyz")
             remedy = _REMEDIATION.get(prefix, "")
         f.remediation = remedy
@@ -174,11 +107,13 @@ def scan_target(
     """Run all enabled layers on the target and aggregate results.
 
     Supports Python (.py) and JavaScript/TypeScript (.js/.ts/.jsx/.tsx) files.
-    L1/L2/L4 work on Python files; L3 (Semgrep) works on both Python and JS/TS.
+    L1: Python (AST + regex) + JS/TS (regex)
+    L2: Python only (AST-based @mcp.tool description parsing)
+    L3: Python + JS/TS (Semgrep taint mode, requires semgrep)
+    L4: Python (AST) + JS/TS (regex)
     """
     skip = skip_layers or set()
     result = ScanResult(target=target)
-
     target_path = Path(target)
 
     # Collect files by language
@@ -200,24 +135,22 @@ def scan_target(
         )
         return result
 
-    # L1: Quick detection — Python only (AST + regex)
+    # L1: Quick detection — Python (AST + regex) + JS/TS (regex)
     if "l1" not in skip:
         for f in py_files:
-            findings = run_l1(f)
-            result.findings.extend(findings)
+            result.findings.extend(run_l1(f))
+        for f in js_files:
+            result.findings.extend(run_l1_js(f))
 
     # L2: MCP structure analysis — Python only (AST-based)
     if "l2" not in skip:
         for f in py_files:
-            findings = run_l2(f, state_file=state_file)
-            result.findings.extend(findings)
+            result.findings.extend(run_l2(f, state_file=state_file))
 
     # L3: Taint analysis via Semgrep — Python + JS/TS
     if "l3" not in skip:
         if l3_available():
-            # Semgrep scans all supported languages in one pass
-            findings = run_l3(target_path)
-            result.findings.extend(findings)
+            result.findings.extend(run_l3(target_path))
         else:
             result.errors.append(
                 "L3 skipped: semgrep not installed. "
@@ -227,23 +160,20 @@ def scan_target(
     # L4: Description-code mismatch — Python (AST) + JS/TS (regex)
     if "l4" not in skip:
         for f in py_files:
-            findings = run_l4(f)
-            result.findings.extend(findings)
-        # JS/TS L4 — regex-based, no external parser needed
+            result.findings.extend(run_l4(f))
         for f in js_files:
-            findings = run_l4_js(f)
-            result.findings.extend(findings)
+            result.findings.extend(run_l4_js(f))
 
-    # Apply remediation guidance to all findings
+    # Apply remediation guidance
     _apply_remediation(result.findings)
 
-    # Post-processing: filter out low-confidence low-severity noise
+    # Post-processing: filter low-confidence low-severity noise
     result.findings = [
         f for f in result.findings
         if not (f.severity == Severity.LOW and f.confidence == Confidence.NEEDS_REVIEW)
     ]
 
-    # Deduplicate findings with same (file, line, id)
+    # Deduplicate: same (file, line, id)
     seen: set[tuple] = set()
     deduped = []
     for f in result.findings:
@@ -252,12 +182,5 @@ def scan_target(
             seen.add(key)
             deduped.append(f)
     result.findings = deduped
-
-    # Add language stats to help user understand coverage
-    if js_files and "l1" not in skip:
-        result.errors.append(
-            f"Note: {len(js_files)} JS/TS file(s) found. "
-            f"L1/L2/L4 only analyze Python; L3 (Semgrep) covers JS/TS."
-        )
 
     return result

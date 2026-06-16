@@ -1,4 +1,4 @@
-﻿"""L1: Quick detection layer — fast pattern matching without deep analysis.
+"""L1: Quick detection layer — fast pattern matching without deep analysis.
 
 Detects:
 - Hardcoded secrets (precise vendor token formats)
@@ -123,8 +123,247 @@ def run_l1(file_path: Path) -> list[Finding]:
 
     try:
         content = file_path.read_text(encoding="utf-8", errors="replace")
-    except (OSError, PermissionError) as e:
+    except (OSError, PermissionError):
         return findings
+
+    lines = content.split("\n")
+    file_str = str(file_path)
+
+    # ── Token detection ──
+    for name, fid, pattern in TOKEN_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if COMMENT_LINE.match(line):
+                continue
+            for match in pattern.finditer(line):
+                context = line[max(0, match.start() - 30):match.end() + 30]
+                if TOKEN_EXCLUSIONS.search(context):
+                    continue
+                findings.append(Finding(
+                    id=fid,
+                    title=f"Hardcoded {name} detected",
+                    severity=Severity.CRITICAL,
+                    layer="L1",
+                    file=file_str,
+                    line=i,
+                    evidence=f"Pattern: {match.group()[:20]}...",
+                    owasp_mcp="MCP04",
+                    cia_impact=[CIAImpact.CONFIDENTIALITY],
+                    security_property=SecurityProperty.DATA_ISOLATION,
+                ))
+
+    # ── Unicode steganography ──
+    zw_count = len(ZERO_WIDTH_CHARS.findall(content))
+    rtl_matches = RTL_OVERRIDE.findall(content)
+    tag_matches = UNICODE_TAGS.findall(content)
+    var_sel_matches = VARIATION_SELECTORS.findall(content)
+
+    if zw_count > 50:
+        findings.append(Finding(
+            id="MCPX-L1-020",
+            title="Excessive zero-width characters (possible hidden instructions)",
+            severity=Severity.HIGH, layer="L1", file=file_str,
+            evidence=f"{zw_count} zero-width characters found",
+            owasp_mcp="MCP01", security_property=SecurityProperty.SOURCE_AUTHORIZATION,
+        ))
+    if rtl_matches:
+        findings.append(Finding(
+            id="MCPX-L1-021",
+            title="RTL/LTR override characters detected (text direction manipulation)",
+            severity=Severity.HIGH, layer="L1", file=file_str,
+            evidence=f"{len(rtl_matches)} directional override characters",
+            owasp_mcp="MCP01", security_property=SecurityProperty.SOURCE_AUTHORIZATION,
+        ))
+    if tag_matches or var_sel_matches:
+        count = len(tag_matches) + len(var_sel_matches)
+        findings.append(Finding(
+            id="MCPX-L1-022",
+            title="Unicode tag/variation selector characters (steganography indicator)",
+            severity=Severity.HIGH, layer="L1", file=file_str,
+            evidence=f"{count} tag/variation selector characters",
+            owasp_mcp="MCP01", security_property=SecurityProperty.SOURCE_AUTHORIZATION,
+        ))
+
+    # ── Dangerous imports/calls ──
+    for desc, fid, pattern, severity in DANGEROUS_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            if COMMENT_LINE.match(line):
+                continue
+            if pattern.search(line):
+                findings.append(Finding(
+                    id=fid,
+                    title=desc,
+                    severity=severity,
+                    layer="L1",
+                    file=file_str,
+                    line=i,
+                    evidence=line.strip()[:120],
+                    confidence=Confidence.MEDIUM,
+                    description="Flagged as dangerous pattern. L3 taint analysis needed to confirm exploitability.",
+                ))
+
+    # ── Base64 blocks in docstrings ──
+    in_docstring = False
+    docstring_delim = None
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not in_docstring:
+            if '"""' in stripped or "'''" in stripped:
+                delim = '"""' if '"""' in stripped else "'''"
+                count = stripped.count(delim)
+                if count == 1:
+                    in_docstring = True
+                    docstring_delim = delim
+                elif count >= 2:
+                    for m in BASE64_BLOCK.finditer(stripped):
+                        findings.append(Finding(
+                            id="MCPX-L1-025",
+                            title="Large base64 block in docstring (possible encoded instructions)",
+                            severity=Severity.MEDIUM, layer="L1", file=file_str, line=i,
+                            evidence=f"base64 block ({len(m.group())} chars)",
+                            owasp_mcp="MCP01", confidence=Confidence.NEEDS_REVIEW,
+                        ))
+        else:
+            if docstring_delim and docstring_delim in stripped:
+                in_docstring = False
+                docstring_delim = None
+            else:
+                for m in BASE64_BLOCK.finditer(line):
+                    findings.append(Finding(
+                        id="MCPX-L1-025",
+                        title="Large base64 block in docstring (possible encoded instructions)",
+                        severity=Severity.MEDIUM, layer="L1", file=file_str, line=i,
+                        evidence=f"base64 block ({len(m.group())} chars)",
+                        owasp_mcp="MCP01", confidence=Confidence.NEEDS_REVIEW,
+                    ))
+
+    return findings
+
+
+# JS/TS comment patterns
+_JS_COMMENT_LINE = re.compile(r'^\s*//')
+_JS_BLOCK_COMMENT = re.compile(r'^\s*\*')
+
+# JS/TS dangerous patterns (regex-based, no AST needed)
+DANGEROUS_PATTERNS_JS: list[tuple[str, str, re.Pattern, Severity]] = [
+    ("eval() — arbitrary code execution",
+     "MCPX-L1-013",
+     re.compile(r'(?<![.\w])eval\s*\('),
+     Severity.MEDIUM),
+    ("new Function() — dynamic code construction",
+     "MCPX-L1-014",
+     re.compile(r'\bnew\s+Function\s*\('),
+     Severity.MEDIUM),
+    ("child_process.exec — shell command execution",
+     "MCPX-L1-015",
+     re.compile(r'\bexec\s*\(|\.exec\s*\('),
+     Severity.MEDIUM),
+    ("child_process.execSync — synchronous shell execution",
+     "MCPX-L1-015b",
+     re.compile(r'\bexecSync\s*\('),
+     Severity.MEDIUM),
+    ("child_process.spawn — process spawning",
+     "MCPX-L1-015c",
+     re.compile(r'\bspawn\s*\(|\.spawn\s*\('),
+     Severity.MEDIUM),
+    ("__doc__ equivalent: dynamic description assignment",
+     "MCPX-L1-019",
+     re.compile(r'\.description\s*=\s*[^;{]+;'),
+     Severity.MEDIUM),
+]
+
+
+def run_l1_js(file_path: Path) -> list[Finding]:
+    """Run L1 quick checks on a JS/TS file.
+
+    Covers:
+    - Hardcoded secrets (same TOKEN_PATTERNS as Python — purely regex)
+    - Unicode steganography
+    - Dangerous JS patterns (eval, exec, spawn, new Function)
+    """
+    findings: list[Finding] = []
+
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except (OSError, PermissionError):
+        return findings
+
+    lines = content.split("\n")
+    file_str = str(file_path)
+
+    # ── Token detection (same patterns as Python — purely regex) ──
+    for name, fid, pattern in TOKEN_PATTERNS:
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if _JS_COMMENT_LINE.match(stripped) or _JS_BLOCK_COMMENT.match(stripped):
+                continue
+            for match in pattern.finditer(line):
+                context = line[max(0, match.start() - 30):match.end() + 30]
+                if TOKEN_EXCLUSIONS.search(context):
+                    continue
+                findings.append(Finding(
+                    id=fid,
+                    title=f"Hardcoded {name} detected",
+                    severity=Severity.CRITICAL,
+                    layer="L1",
+                    file=file_str,
+                    line=i,
+                    evidence=f"Pattern: {match.group()[:20]}...",
+                    owasp_mcp="MCP04",
+                    cia_impact=[CIAImpact.CONFIDENTIALITY],
+                    security_property=SecurityProperty.DATA_ISOLATION,
+                ))
+
+    # ── Unicode steganography ──
+    zw_count = len(ZERO_WIDTH_CHARS.findall(content))
+    rtl_matches = RTL_OVERRIDE.findall(content)
+    tag_matches = UNICODE_TAGS.findall(content)
+    var_sel_matches = VARIATION_SELECTORS.findall(content)
+
+    if zw_count > 50:
+        findings.append(Finding(
+            id="MCPX-L1-020",
+            title="Excessive zero-width characters (possible hidden instructions)",
+            severity=Severity.HIGH, layer="L1", file=file_str,
+            evidence=f"{zw_count} zero-width characters found",
+            owasp_mcp="MCP01", security_property=SecurityProperty.SOURCE_AUTHORIZATION,
+        ))
+    if rtl_matches:
+        findings.append(Finding(
+            id="MCPX-L1-021",
+            title="RTL/LTR override characters detected (text direction manipulation)",
+            severity=Severity.HIGH, layer="L1", file=file_str,
+            evidence=f"{len(rtl_matches)} directional override characters",
+            owasp_mcp="MCP01", security_property=SecurityProperty.SOURCE_AUTHORIZATION,
+        ))
+    if tag_matches or var_sel_matches:
+        findings.append(Finding(
+            id="MCPX-L1-022",
+            title="Unicode tag/variation selector characters (steganography indicator)",
+            severity=Severity.HIGH, layer="L1", file=file_str,
+            evidence=f"{len(tag_matches) + len(var_sel_matches)} tag/variation selector characters",
+            owasp_mcp="MCP01", security_property=SecurityProperty.SOURCE_AUTHORIZATION,
+        ))
+
+    # ── Dangerous JS patterns ──
+    for desc, fid, pattern, severity in DANGEROUS_PATTERNS_JS:
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if _JS_COMMENT_LINE.match(stripped) or _JS_BLOCK_COMMENT.match(stripped):
+                continue
+            if pattern.search(line):
+                findings.append(Finding(
+                    id=fid,
+                    title=desc,
+                    severity=severity,
+                    layer="L1",
+                    file=file_str,
+                    line=i,
+                    evidence=line.strip()[:120],
+                    confidence=Confidence.MEDIUM,
+                    description="Flagged as dangerous pattern in JS/TS. Verify context.",
+                ))
+
+    return findings
 
     lines = content.split("\n")
     file_str = str(file_path)
