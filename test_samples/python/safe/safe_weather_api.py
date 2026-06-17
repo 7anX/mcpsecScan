@@ -23,7 +23,10 @@ def get_weather(city: str) -> str:
 
 @mcp.tool()
 def search_cities(query: str) -> str:
-    """Search for cities matching a query string."""
+    """Search for cities matching a query string via the OpenWeatherMap geocoding API.
+
+    Sends an HTTP request to the geocoding endpoint and returns matching city results.
+    """
     # 用户输入只用于查询参数，不控制 host
     safe_query = re.sub(r'[^a-zA-Z0-9\s]', '', query)
     url = f"https://api.openweathermap.org/geo/1.0/direct?q={safe_query}&limit=5"
