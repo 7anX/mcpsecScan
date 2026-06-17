@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>mcpsec-scan</title>
+  <title>mcpsecscan</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
   <style>
@@ -17,7 +17,7 @@
     <div class="flex items-center justify-between max-w-7xl mx-auto">
       <div class="flex items-center gap-3">
         <div class="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center font-bold text-sm">MS</div>
-        <h1 class="text-xl font-bold">mcpsec-scan</h1>
+        <h1 class="text-xl font-bold">mcpsecscan</h1>
         <span class="text-xs bg-gray-700 px-2 py-0.5 rounded" x-text="'v' + info.version"></span>
       </div>
       <div class="flex items-center gap-4">
@@ -49,20 +49,30 @@
           <div class="space-y-1">
             <label class="flex items-center gap-2 text-sm">
               <input type="checkbox" x-model="layers.l1" class="rounded">
-              <span x-text="'L1 - ' + t('l1Name')"></span>
+              <span>L1 - <span x-text="t('l1Name')"></span></span>
             </label>
             <label class="flex items-center gap-2 text-sm">
               <input type="checkbox" x-model="layers.l2" class="rounded">
-              <span x-text="'L2 - ' + t('l2Name')"></span>
+              <span>L2 - <span x-text="t('l2Name')"></span></span>
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" x-model="layers.l2combo" class="rounded">
+              <span>L2-Combo - <span x-text="t('l2comboName')"></span></span>
+              <span class="text-xs text-gray-500" x-text="t('dirOnly')"></span>
             </label>
             <label class="flex items-center gap-2 text-sm">
               <input type="checkbox" x-model="layers.l3" class="rounded">
-              <span x-text="'L3 - ' + t('l3Name')"></span>
+              <span>L3 - <span x-text="t('l3Name')"></span></span>
               <span x-show="!info.layers?.l3?.available" class="text-xs text-yellow-500" x-text="t('semgrepRequired')"></span>
             </label>
             <label class="flex items-center gap-2 text-sm">
               <input type="checkbox" x-model="layers.l4" class="rounded">
-              <span x-text="'L4 - ' + t('l4Name')"></span>
+              <span>L4 - <span x-text="t('l4Name')"></span></span>
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="checkbox" x-model="layers.l5" class="rounded">
+              <span>L5 - <span x-text="t('l5Name')"></span></span>
+              <span class="text-xs text-gray-500" x-text="t('dirOnly')"></span>
             </label>
           </div>
         </div>
@@ -92,11 +102,26 @@
           </label>
         </div>
 
-        <div x-show="info.ai_available && ai.enabled" x-cloak class="space-y-2">
+        <div x-show="info.ai_available && ai.enabled" x-cloak class="space-y-3">
+          <!-- Mode toggle -->
+          <div>
+            <label class="block text-xs text-gray-400 mb-1.5" x-text="t('aiMode')"></label>
+            <div class="flex rounded-md overflow-hidden border border-gray-600 text-xs">
+              <button @click="ai.mode = 'basic'"
+                      :class="ai.mode === 'basic' ? 'bg-green-700 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'"
+                      class="flex-1 py-1.5 transition" x-text="t('aiModeBasic')"></button>
+              <button @click="ai.mode = 'deep'"
+                      :class="ai.mode === 'deep' ? 'bg-purple-700 text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'"
+                      class="flex-1 py-1.5 transition" x-text="t('aiModeDeep')"></button>
+            </div>
+            <p class="mt-1.5 text-xs text-gray-500" x-text="ai.mode === 'basic' ? t('aiModeBasicDesc') : t('aiModeDeepDesc')"></p>
+          </div>
           <div>
             <label class="block text-xs text-gray-400 mb-1" x-text="t('aiModel')"></label>
-            <input type="text" x-model="ai.model" placeholder="gpt-4o-mini"
+            <input type="text" x-model="ai.model"
+                   :placeholder="ai.mode === 'deep' ? 'gpt-4o (recommended)' : 'gpt-4o-mini'"
                    class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-xs focus:border-green-500 focus:outline-none">
+            <p x-show="ai.mode === 'deep'" class="mt-1 text-xs text-yellow-500" x-text="t('deepModelHint')"></p>
           </div>
           <div>
             <label class="block text-xs text-gray-400 mb-1" x-text="t('aiUrl')"></label>
@@ -118,7 +143,7 @@
         <div class="space-y-1 text-xs text-gray-400">
           <template x-for="(layer, key) in info.layers" :key="key">
             <div class="flex justify-between">
-              <span x-text="key.toUpperCase() + ' ' + layer.name"></span>
+              <span x-text="key.toUpperCase() + ' · ' + layer.name"></span>
               <span :class="layer.available ? 'text-green-400' : 'text-yellow-500'" x-text="layer.available ? t('ready') : t('na')"></span>
             </div>
           </template>
@@ -187,13 +212,14 @@
                   }" class="px-2 py-0.5 rounded text-xs font-medium text-white uppercase shrink-0" x-text="t('sev_' + f.severity)"></span>
                   <div class="flex-1 min-w-0">
                     <p class="text-sm font-medium text-gray-100" x-text="f.title"></p>
-                    <div class="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                    <div class="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
                       <span x-text="f.file + ':' + f.line"></span>
                       <span class="bg-gray-700 px-1.5 py-0.5 rounded" x-text="f.layer"></span>
-                      <span x-show="f.owasp_mcp" class="text-blue-400" x-text="f.owasp_mcp"></span>
+                      <span x-show="f.tool_name" class="text-blue-400" x-text="'tool: ' + f.tool_name"></span>
+                      <span x-show="f.owasp_mcp" class="text-gray-500" x-text="f.owasp_mcp"></span>
                     </div>
-                    <div x-show="f.evidence" class="mt-2 text-xs text-gray-500 bg-gray-800 p-2 rounded font-mono break-all" x-text="f.evidence"></div>
-                    <!-- AI verdict badge (shown when triage available) -->
+                    <div x-show="f.evidence" class="mt-2 text-xs text-gray-500 bg-gray-800 p-2 rounded font-mono break-all whitespace-pre-wrap" x-text="f.evidence"></div>
+                    <!-- AI verdict (inline in finding card) -->
                     <template x-if="getVerdict(f.id)">
                       <div class="mt-2 flex items-start gap-2">
                         <span :class="{
@@ -211,7 +237,7 @@
             </template>
           </div>
 
-          <!-- Errors -->
+          <!-- Errors / limits -->
           <template x-for="err in result?.errors || []">
             <div class="text-xs text-yellow-500 bg-yellow-900/20 p-2 rounded" x-text="err"></div>
           </template>
@@ -219,13 +245,17 @@
       </div>
 
       <!-- AI Triage Panel -->
-      <div x-show="result && result.total_findings > 0 && info.ai_available && ai.enabled" x-cloak
+      <div x-show="result && info.ai_available && ai.enabled" x-cloak
            class="bg-gray-800 rounded-lg border border-gray-700 p-5">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide">🤖 AI Triage</h2>
+          <div>
+            <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide">🤖 AI <span x-text="t('aiTriage')"></span></h2>
+            <p class="text-xs text-gray-500 mt-0.5" x-text="ai.mode === 'deep' ? t('aiModeDeepDesc') : t('aiModeBasicDesc')"></p>
+          </div>
           <button @click="runAITriage()"
                   :disabled="aiTriaging"
-                  class="text-xs bg-purple-700 hover:bg-purple-600 disabled:bg-gray-600 px-3 py-1.5 rounded transition">
+                  :class="ai.mode === 'deep' ? 'bg-purple-700 hover:bg-purple-600' : 'bg-blue-700 hover:bg-blue-600'"
+                  class="text-xs disabled:bg-gray-600 px-3 py-1.5 rounded transition">
             <span x-show="!aiTriaging" x-text="t('runAI')"></span>
             <span x-show="aiTriaging" class="flex items-center gap-1">
               <svg class="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
@@ -250,11 +280,27 @@
           </div>
           <p class="text-sm text-gray-300 mb-4" x-text="aiTriage?.summary"></p>
 
-          <!-- No items state -->
+          <!-- AI-BS blind-spot findings (deep mode) -->
+          <template x-for="item in (aiTriage?.items || []).filter(i => i.finding_id.startsWith('AI-BS'))">
+            <div class="mb-3 bg-purple-900/20 border border-purple-700/50 rounded p-3">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-xs bg-purple-700 text-white px-1.5 py-0.5 rounded" x-text="item.finding_id"></span>
+                <span :class="{
+                  'text-red-300': item.verdict==='confirmed',
+                  'text-green-300': item.verdict==='likely_fp',
+                  'text-yellow-300': item.verdict==='needs_review'
+                }" class="text-xs" x-text="item.verdict"></span>
+              </div>
+              <p class="text-xs text-gray-300" x-text="item.explanation"></p>
+              <p x-show="item.attack_scenario" class="text-xs text-orange-300 mt-1" x-text="'⚠ ' + item.attack_scenario"></p>
+              <p x-show="item.fix_suggestion" class="text-xs text-green-400 mt-1" x-text="'Fix: ' + item.fix_suggestion"></p>
+            </div>
+          </template>
+
           <div x-show="!aiTriage?.items?.length" class="text-xs text-gray-500" x-text="t('noAIItems')"></div>
         </div>
 
-        <!-- Placeholder when not run -->
+        <!-- Placeholder -->
         <div x-show="!aiTriage && !aiTriaging" class="text-center py-6 text-gray-500 text-sm" x-text="t('aiPlaceholder')"></div>
       </div>
 
@@ -265,23 +311,23 @@
     function scanApp() {
       return {
         target: '',
-        layers: { l1: true, l2: true, l3: true, l4: true },
+        layers: { l1: true, l2: true, l2combo: true, l3: true, l4: true, l5: true },
         scanning: false,
         result: null,
         error: null,
         info: { version: '...', layers: {}, rules_count: 0, ai_available: false },
         lang: localStorage.getItem('mcpsec-lang') || 'zh',
 
-        // AI triage
         ai: {
           enabled: false,
+          mode: localStorage.getItem('mcpsec-ai-mode') || 'basic',
           model: localStorage.getItem('mcpsec-ai-model') || 'gpt-4o-mini',
           url: localStorage.getItem('mcpsec-ai-url') || 'https://api.openai.com/v1',
           key: '',
         },
         aiTriage: null,
         aiTriaging: false,
-        verdictMap: {},   // finding_id → triage item
+        verdictMap: {},
 
         i18n: {
           en: {
@@ -292,15 +338,18 @@
             layers: 'Detection Layers',
             l1Name: 'Quick Detection',
             l2Name: 'MCP Structure',
+            l2comboName: 'Combo Risk',
             l3Name: 'Taint Analysis',
             l4Name: 'Desc-Code Mismatch',
+            l5Name: 'Import Chain',
+            dirOnly: '(dir only)',
             semgrepRequired: '(semgrep required)',
             scanBtn: 'Scan',
             scanning: 'Scanning...',
-            status: 'Status',
+            status: 'Layer Status',
             ready: 'Ready',
             na: 'N/A',
-            rules: 'Rules',
+            rules: 'Semgrep rules',
             filesUnit: ' files',
             emptyState: 'Enter a path and click Scan to start',
             noIssues: 'No security issues found',
@@ -309,16 +358,22 @@
             sev_high: 'high',
             sev_medium: 'medium',
             sev_low: 'low',
-            aiTriage: 'AI Triage',
+            aiTriage: 'Triage',
+            aiMode: 'Mode',
+            aiModeBasic: 'Basic',
+            aiModeDeep: 'Deep',
+            aiModeBasicDesc: 'Triage existing findings — verdict, attack path, fix',
+            aiModeDeepDesc: 'Also detects env leaks / async backdoors / combo risk (0 findings still useful)',
+            deepModelHint: 'Deep mode: gpt-4o recommended over mini',
             aiModel: 'Model',
             aiUrl: 'API URL',
             aiKey: 'API Key',
-            aiNote: 'Key stored in browser session only, never sent to server.',
-            runAI: 'Analyze with AI',
+            aiNote: 'Key stored in browser session only.',
+            runAI: 'Analyze',
             analyzing: 'Analyzing...',
             overallRisk: 'Overall Risk',
-            noAIItems: 'No per-finding details returned.',
-            aiPlaceholder: 'Click "Analyze with AI" to get risk assessment and attack scenarios.',
+            noAIItems: 'No items returned.',
+            aiPlaceholder: 'Click "Analyze" to get risk assessment.',
           },
           zh: {
             subtitle: 'MCP Server 静态安全扫描器',
@@ -328,15 +383,18 @@
             layers: '检测层',
             l1Name: '快速检测',
             l2Name: 'MCP 结构分析',
+            l2comboName: '工具组合风险',
             l3Name: '污点分析',
             l4Name: '描述-代码一致性',
+            l5Name: 'Import 链追踪',
+            dirOnly: '(仅目录扫描)',
             semgrepRequired: '(需安装 semgrep)',
             scanBtn: '开始扫描',
             scanning: '扫描中...',
-            status: '状态',
+            status: '层状态',
             ready: '就绪',
             na: '不可用',
-            rules: '规则数',
+            rules: 'Semgrep 规则',
             filesUnit: ' 个文件',
             emptyState: '输入路径后点击"开始扫描"',
             noIssues: '未发现安全问题',
@@ -345,7 +403,13 @@
             sev_high: '高危',
             sev_medium: '中危',
             sev_low: '低危',
-            aiTriage: 'AI 风险研判',
+            aiTriage: 'AI 研判',
+            aiMode: '模式',
+            aiModeBasic: '普通',
+            aiModeDeep: '深度',
+            aiModeBasicDesc: '研判已检出的 findings：判断真/假阳性，给出攻击路径和修复建议',
+            aiModeDeepDesc: '额外检测静态盲区（env 泄露 / async 隐藏行为 / 组合风险），0 findings 也有价值',
+            deepModelHint: '深度模式建议使用 gpt-4o，mini 可能判断不准',
             aiModel: '模型名称',
             aiUrl: 'API 地址',
             aiKey: 'API 密钥',
@@ -353,13 +417,13 @@
             runAI: 'AI 分析',
             analyzing: '分析中...',
             overallRisk: '整体风险',
-            noAIItems: '未返回逐条判定结果。',
-            aiPlaceholder: '点击"AI 分析"获取风险研判和攻击路径解释。',
+            noAIItems: '未返回结果。',
+            aiPlaceholder: '点击"AI 分析"获取风险研判。',
           }
         },
 
         t(key) {
-          return this.i18n[this.lang]?.[key] || this.i18n['en'][key] || key;
+          return this.i18n[this.lang]?.[key] ?? this.i18n['en'][key] ?? key;
         },
 
         toggleLang() {
@@ -389,8 +453,10 @@
           const skip = [];
           if (!this.layers.l1) skip.push('l1');
           if (!this.layers.l2) skip.push('l2');
+          if (!this.layers.l2combo) skip.push('combo');
           if (!this.layers.l3) skip.push('l3');
           if (!this.layers.l4) skip.push('l4');
+          if (!this.layers.l5) skip.push('l5');
 
           try {
             const resp = await fetch('/api/scan', {
@@ -405,19 +471,19 @@
               this.result = await resp.json();
             }
           } catch(e) {
-            this.error = this.lang === 'zh' ? '连接失败: ' + e.message : 'Connection failed: ' + e.message;
+            this.error = (this.lang === 'zh' ? '连接失败: ' : 'Connection failed: ') + e.message;
           } finally {
             this.scanning = false;
           }
         },
 
         async runAITriage() {
-          if (!this.result || !this.result.findings.length || this.aiTriaging) return;
+          if (!this.result || this.aiTriaging) return;
           this.aiTriaging = true;
           this.aiTriage = null;
           this.verdictMap = {};
 
-          // Persist AI config
+          localStorage.setItem('mcpsec-ai-mode', this.ai.mode);
           localStorage.setItem('mcpsec-ai-model', this.ai.model);
           localStorage.setItem('mcpsec-ai-url', this.ai.url);
 
@@ -431,11 +497,11 @@
                 api_url: this.ai.url,
                 api_key: this.ai.key,
                 model: this.ai.model,
+                mode: this.ai.mode,
               })
             });
             const data = await resp.json();
             this.aiTriage = data;
-            // Build verdict map for inline display in finding cards
             if (data.items) {
               for (const item of data.items) {
                 this.verdictMap[item.finding_id] = item;

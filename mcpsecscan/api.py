@@ -29,6 +29,7 @@ class AITriageRequest(BaseModel):
     api_url: str = "https://api.openai.com/v1"
     api_key: str = ""
     model: str = "gpt-4o-mini"
+    mode: str = "basic"   # "basic" | "deep"
 
 
 class ScanResponse(BaseModel):
@@ -86,11 +87,23 @@ async def api_ai_triage(req: AITriageRequest):
     # Reconstruct a minimal ScanResult from the dict findings
     scan_dict = {"target": req.target, "findings": req.findings}
 
+    # For deep mode, collect py files from the target path
+    py_files = None
+    if req.mode == "deep" and req.target:
+        target_path = Path(req.target)
+        if target_path.exists():
+            if target_path.is_file():
+                py_files = [target_path]
+            else:
+                py_files = sorted(f for f in target_path.rglob("*.py") if f.is_file())
+
     report = triage(
         scan_dict,
         api_url=req.api_url,
         api_key=req.api_key,
         model=req.model,
+        mode=req.mode,
+        py_files=py_files,
     )
 
     return {
@@ -125,8 +138,10 @@ async def api_info():
         "layers": {
             "l1": {"name": "Quick Detection", "available": True},
             "l2": {"name": "MCP Structure", "available": True},
+            "l2combo": {"name": "Combo Risk", "available": True},
             "l3": {"name": "Taint Analysis", "available": l3_ok()},
             "l4": {"name": "Desc-Code Mismatch", "available": True},
+            "l5": {"name": "Import Chain", "available": True},
         },
         "rules_count": rule_count,
         "ai_available": ai_ok(),
