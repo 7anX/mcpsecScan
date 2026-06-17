@@ -1,4 +1,4 @@
-"""Main scanner orchestrator — runs L1 through L4 in sequence."""
+"""Main scanner orchestrator — runs L1 through L5 in sequence."""
 
 from __future__ import annotations
 
@@ -7,9 +7,11 @@ from pathlib import Path
 from mcpsecscan.engine.models import ScanResult, Severity, Confidence
 from mcpsecscan.engine.l1_quick import run_l1, run_l1_js
 from mcpsecscan.engine.l2_structure import run_l2
+from mcpsecscan.engine.l2_combo import run_l2_combo
 from mcpsecscan.engine.l3_taint import run_l3, is_available as l3_available
 from mcpsecscan.engine.l4_mismatch import run_l4
 from mcpsecscan.engine.l4_mismatch_js import run_l4_js
+from mcpsecscan.engine.l5_multifile import run_l5
 
 # Supported file extensions per layer
 _PY_EXTS = {".py"}
@@ -83,6 +85,15 @@ _REMEDIATION: dict[str, str] = {
     "MCPX-L4-007": "Add a docstring or description= parameter to all @mcp.tool() functions. Without a description, AI agents cannot safely use the tool.",
     "MCPX-L4-008": "Review the delegation chain. Ensure the called function sanitizes the user parameter before executing it remotely or in a shell.",
     "MCPX-L4-009": "If the tool accepts raw SQL, implement an allowlist of permitted statements (SELECT only) or use an ORM with parameterized queries.",
+    # L2-Combo
+    "MCPX-L2C-001": "Audit whether file-read and outbound-network capabilities need to coexist. Restrict network calls to a hardcoded allowlist, or add explicit user-consent steps before transmitting file contents.",
+    "MCPX-L2C-002": "Audit whether credential-read and outbound-network capabilities need to coexist. Never send env vars or credentials to external endpoints.",
+    "MCPX-L2C-003": "Separate file-write and command-execution into isolated servers. If both are required, add strict path and command allowlists.",
+    "MCPX-L2C-004": "If file-read and command-execution must coexist, restrict executable paths to a hardcoded allowlist and never derive command strings from file contents.",
+    # L5
+    "MCPX-L1-001-IMPORT": "Rotate the AWS key immediately. The key was found in an imported helper module.",
+    "MCPX-L1-010-IMPORT": "Replace pickle with a safe serialization format in the imported module.",
+    "MCPX-L1-015-IMPORT": "Avoid shell=True in the imported module.",
 }
 
 
@@ -109,8 +120,10 @@ def scan_target(
     Supports Python (.py) and JavaScript/TypeScript (.js/.ts/.jsx/.tsx) files.
     L1: Python (AST + regex) + JS/TS (regex)
     L2: Python only (AST-based @mcp.tool description parsing)
+    L2-Combo: Project-level tool capability combination risk (Python, multi-file)
     L3: Python + JS/TS (Semgrep taint mode, requires semgrep)
     L4: Python (AST) + JS/TS (regex)
+    L5: Multi-file import chain analysis (Python, directory scan only)
     """
     skip = skip_layers or set()
     result = ScanResult(target=target)
@@ -163,6 +176,14 @@ def scan_target(
             result.findings.extend(run_l4(f))
         for f in js_files:
             result.findings.extend(run_l4_js(f))
+
+    # L2-Combo: Project-level tool combination risk (requires all per-file layers done)
+    if "l2" not in skip and "combo" not in skip:
+        result.findings.extend(run_l2_combo(py_files))
+
+    # L5: Multi-file import chain analysis
+    if "l5" not in skip and not target_path.is_file():
+        result.findings.extend(run_l5(py_files, root=target_path))
 
     # Apply remediation guidance
     _apply_remediation(result.findings)
