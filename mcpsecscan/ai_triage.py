@@ -102,13 +102,67 @@ _SYSTEM_PROMPT = textwrap.dedent("""\
     - Focus on HIGH and CRITICAL findings first in the summary.
 """)
 
+_SYSTEM_PROMPT_DEEP = textwrap.dedent("""\
+    You are a senior application security engineer specializing in MCP (Model Context Protocol) server security.
+    You will receive:
+    1. Static analysis findings (may be empty if the static layer had no findings)
+    2. Structural tool digests — metadata about each @mcp.tool() function extracted via AST.
+       These digests contain NO source code, only: description, parameters, data sources/sinks,
+       callback registrations, and control flow type.
 
-def _build_user_prompt(scan_dict: dict[str, Any]) -> str:
-    """Build the user message from a scan result dict."""
+    Your job is to:
+    A. Triage each static finding as before (confirmed / likely_fp / needs_review).
+    B. Using the tool digests, detect blind spots that static analysis cannot find:
+       - Semantic data leaks: a tool reads sensitive data (os.environ, credentials file) and
+         returns it in the tool response — even without a dangerous network/file-write call.
+       - Hidden async behavior: a callback registered by the tool performs operations
+         (network POST, file write) not mentioned in the tool's description.
+       - Combination risk: two or more tools together enable multi-step attacks
+         (read file → POST to external URL) even if each tool is individually legitimate.
+
+    Respond ONLY with a valid JSON object:
+    {
+      "risk_level": "<critical|high|medium|low|safe>",
+      "summary": "<2-4 sentence overall risk assessment including blind-spot findings>",
+      "items": [
+        {
+          "finding_id": "<MCPX-Lx-xxx or AI-BS-001/002/003 for blind-spot findings>",
+          "verdict": "<confirmed|likely_fp|needs_review>",
+          "confidence": "<high|medium|low>",
+          "explanation": "<1-3 sentences>",
+          "attack_scenario": "<concrete exploitation path, or empty string>",
+          "fix_suggestion": "<concrete fix>"
+        }
+      ]
+    }
+
+    Blind-spot finding IDs to use:
+    - AI-BS-001: Semantic data leak (env/credentials → return value, no dangerous sink)
+    - AI-BS-002: Hidden async/callback behavior not disclosed in description
+    - AI-BS-003: Tool combination exfiltration channel (confirmed lethal trifecta)
+
+    Rules:
+    - Do NOT wrap the JSON in markdown code fences.
+    - Only emit AI-BS-* findings when you are reasonably confident (medium+ confidence).
+    - For AI-BS-001: confirm only if the tool reads sensitive env vars OR credential files
+      AND the return value goes back to the agent context.
+    - For AI-BS-002: confirm only if callback_operations contains network/file-write ops
+      that are NOT mentioned in the tool description.
+    - For AI-BS-003: confirm only if the combination creates a DIRECT exfiltration path
+      (not just theoretical — the agent must be able to compose them in one session).
+""")
+
+
+def _build_user_prompt(scan_dict: dict[str, Any], tool_digests: list | None = None) -> str:
+    """Build the user message from a scan result dict.
+
+    In deep mode, tool_digests (list of ToolDigest.to_prompt_dict()) are appended
+    so the AI can reason about blind spots beyond static findings.
+    """
     findings = scan_dict.get("findings", [])
     target = scan_dict.get("target", "unknown")
 
-    # Keep only fields the model needs — strip noise
+    # Keep only fields the model needs — strip noise, never send full source paths
     slim_findings = []
     for f in findings:
         slim_findings.append({
@@ -123,11 +177,19 @@ def _build_user_prompt(scan_dict: dict[str, Any]) -> str:
             "tool_name": f.get("tool_name"),
         })
 
-    payload = {
+    payload: dict[str, Any] = {
         "target": target,
         "total_findings": len(slim_findings),
         "findings": slim_findings,
     }
+
+    if tool_digests:
+        payload["tool_digests"] = tool_digests
+        payload["note"] = (
+            "Tool digests contain structural metadata (no source code). "
+            "Use them to detect semantic blind spots not covered by static findings."
+        )
+
     return (
         f"Please triage the following mcpsecscan findings for target: {target}\n\n"
         + json.dumps(payload, indent=2, ensure_ascii=False)
@@ -239,22 +301,26 @@ def triage(
     api_key: str = "",
     model: str = "gpt-4o-mini",
     timeout: int = 60,
+    mode: str = "basic",             # "basic" | "deep"
+    py_files: list | None = None,    # required for mode="deep"
 ) -> TriageReport:
     """Run AI triage on a scan result.
 
     Args:
         scan_result: A ScanResult object or a plain dict from ScanResult.to_dict().
         api_url:     Base URL for OpenAI-compatible API.
-                     Examples:
-                       "https://api.openai.com/v1"          (OpenAI)
-                       "http://localhost:11434/v1"           (Ollama)
-                       "https://xxx.openai.azure.com/..."   (Azure OpenAI)
         api_key:     API key (Bearer token). Empty string for local models.
         model:       Model name, e.g. "gpt-4o-mini", "llama3", "deepseek-coder".
         timeout:     HTTP timeout in seconds.
+        mode:        "basic" — triage existing findings only (no source code sent).
+                     "deep"  — also extract AST-based tool digests for blind-spot
+                               detection (env leaks, async callbacks, combo risk).
+                               Still sends NO source code — only structural metadata.
+        py_files:    List of Path objects to scan for tool digests (deep mode only).
 
     Returns:
         TriageReport with per-finding verdicts and overall summary.
+        In deep mode, may include AI-BS-* blind-spot findings.
     """
     # Normalise input
     if hasattr(scan_result, "to_dict"):
@@ -262,22 +328,32 @@ def triage(
     else:
         scan_dict = scan_result
 
-    # Short-circuit: nothing to triage
-    if not scan_dict.get("findings"):
+    # Build tool digests for deep mode
+    tool_digests = None
+    system_prompt = _SYSTEM_PROMPT
+    if mode == "deep" and py_files:
+        from mcpsecscan.ai_deep_analysis import collect_server_digests
+        digests = collect_server_digests(py_files)
+        if digests:
+            tool_digests = [d.to_prompt_dict() for d in digests]
+            system_prompt = _SYSTEM_PROMPT_DEEP
+
+    # Short-circuit: nothing to triage (basic mode only — deep always runs)
+    if mode == "basic" and not scan_dict.get("findings"):
         return TriageReport(
             model=model,
             risk_level="safe",
             summary="No findings to triage.",
         )
 
-    user_prompt = _build_user_prompt(scan_dict)
+    user_prompt = _build_user_prompt(scan_dict, tool_digests=tool_digests)
 
     try:
         raw = _call_openai_compat(
             api_url=api_url,
             api_key=api_key,
             model=model,
-            system=_SYSTEM_PROMPT,
+            system=system_prompt,
             user=user_prompt,
             timeout=timeout,
         )
