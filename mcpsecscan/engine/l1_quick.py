@@ -89,6 +89,10 @@ DANGEROUS_PATTERNS: list[tuple[str, str, re.Pattern, Severity]] = [
      "MCPX-L1-015",
      re.compile(r'subprocess\.\w+\([^)]*shell\s*=\s*True'),
      Severity.MEDIUM),
+    ("subprocess.run/call/Popen with string argument (potential injection without shell=True)",
+     "MCPX-L1-015b",
+     re.compile(r'subprocess\.(?:run|call|Popen|check_output|check_call)\s*\(\s*(?![\[\(])(?!subprocess)'),
+     Severity.LOW),
     ("os.system() — shell command execution",
      "MCPX-L1-016",
      re.compile(r'\bos\.system\s*\('),
@@ -105,6 +109,45 @@ DANGEROUS_PATTERNS: list[tuple[str, str, re.Pattern, Severity]] = [
      "MCPX-L1-019",
      re.compile(r'\w+\.__doc__\s*='),
      Severity.HIGH),
+    # ── DNS exfiltration via socket ──────────────────────────────────────────
+    # socket.getaddrinfo / gethostbyname used with dynamic (non-literal) argument
+    # is a common DNS exfil channel — attacker encodes secrets into subdomain names
+    ("socket DNS lookup with dynamic argument — possible DNS exfiltration channel",
+     "MCPX-L1-023",
+     re.compile(r'\bsocket\.(?:getaddrinfo|gethostbyname(?:_ex)?)\s*\(\s*(?![\"\'])'),
+     Severity.MEDIUM),
+    # ── Path traversal via os.path.join with user input ──────────────────────
+    # os.path.join does NOT prevent traversal when the second arg starts with /
+    # or contains ../ sequences. Flag when a variable (not a literal) is joined.
+    ("os.path.join with variable path — possible path traversal",
+     "MCPX-L1-024",
+     re.compile(r'\bos\.path\.join\s*\([^)]*,\s*(?!["\'])'),
+     Severity.LOW),
+    # ── importlib.import_module with dynamic argument ────────────────────────
+    # Allows loading arbitrary modules at runtime — RCE if combined with getattr()
+    ("importlib.import_module with dynamic argument — potential arbitrary code execution",
+     "MCPX-L1-026",
+     re.compile(r'\bimportlib\.import_module\s*\(\s*(?!["\'])'),
+     Severity.MEDIUM),
+    # ── threading.Thread pointing at a module-level function ─────────────────
+    # A background thread started at module load (outside any @mcp.tool) with
+    # a network/file/exec target is a persistent backdoor pattern.
+    ("threading.Thread at module level — possible persistent background backdoor",
+     "MCPX-L1-027",
+     re.compile(r'\bthreading\.Thread\s*\('),
+     Severity.MEDIUM),
+    # ── Jinja2 Template with dynamic argument ────────────────────────────────
+    # Template(user_input) → SSTI RCE. Safe use is Template("literal string").
+    ("Jinja2 Template() with dynamic argument — Server-Side Template Injection risk",
+     "MCPX-L1-028",
+     re.compile(r'\bTemplate\s*\(\s*(?!["\'])'),
+     Severity.HIGH),
+    # ── Credential logging — password/token/secret in logging call ───────────
+    # logger.debug(f"pass={password}") leaks credentials to log files.
+    ("Credential in logging call — password/token/secret logged in plaintext",
+     "MCPX-L1-029",
+     re.compile(r'\b(?:log(?:ger)?\.(?:debug|info|warning|error|critical)|print)\s*\([^)]*(?:pass(?:word)?|token|secret|credential|api_?key)\b', re.I),
+     Severity.MEDIUM),
 ]
 
 # Exclusion: skip if inside a comment line

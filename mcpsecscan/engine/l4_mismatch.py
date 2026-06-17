@@ -56,6 +56,25 @@ DESC_ACKNOWLEDGES_NETWORK = re.compile(
     re.I,
 )
 
+# ─── Reverse detection: keywords that would disclose dangerous ops ───────────
+# If description contains NONE of these words but code does the op → undisclosed
+
+# Words a legitimate tool description would use if it writes/modifies files
+DESC_DISCLOSES_WRITE = re.compile(
+    r'\b(?:writ|modif|creat|delet|updat|append|remov|chang|sav|stor|overwrite|generat)\w*\b',
+    re.I,
+)
+# Words a legitimate tool description would use if it makes network requests
+DESC_DISCLOSES_NETWORK = re.compile(
+    r'\b(?:fetch|request|call|connect|send|upload|download|post|get|http|api|url|endpoint|network|internet|external|remote)\w*\b',
+    re.I,
+)
+# Words a legitimate tool description would use if it runs shell commands
+DESC_DISCLOSES_COMMAND = re.compile(
+    r'\b(?:execut|run|invoke|call|spawn|launch|command|shell|subprocess|process|script|bash|sh|cmd|terminal)\w*\b',
+    re.I,
+)
+
 # ─── Actual code operation detection (AST-based) ────────────────────────────
 
 # Dangerous call patterns that we check in the function body
@@ -72,6 +91,11 @@ NETWORK_CALLS = {
     "urllib.request.urlopen", "urllib.request.Request",
     "aiohttp.ClientSession",
     "socket.connect", "socket.create_connection",
+    # aiohttp async context manager patterns
+    "session.get", "session.post", "session.put", "session.delete",
+    "session.request", "session.patch",
+    # socket DNS exfil patterns
+    "socket.getaddrinfo", "socket.gethostbyname",
 }
 
 COMMAND_EXEC_CALLS = {
@@ -332,17 +356,31 @@ def _merge_callee_ops(
     tool_node: ast.FunctionDef,
     file_func_ops: dict[str, dict[str, list[int]]],
     ops: dict[str, list[int]],
+    file_func_nodes: dict[str, ast.FunctionDef],
 ) -> None:
-    """Merge ops from directly-called local functions into the tool's ops dict (depth=2).
+    """Merge ops from called local functions into the tool's ops dict (depth=3).
 
-    Catches the mcp-shell-server pattern:
-        call_tool() → self.shell_executor.execute(command) → asyncio.create_subprocess_shell
-
-    We look at all Call nodes in the tool body. If the callee is a local function
-    whose name appears in file_func_ops, we merge its ops into the tool's ops,
-    adjusting line numbers to point to the call site.
+    Recursively resolves up to 3 levels of call delegation:
+        tool → helper → dangerous_call   (depth 2, original)
+        tool → helper → wrapper → sink   (depth 3, new)
     """
-    for node in _iter_direct_calls(tool_node):
+    _merge_callee_ops_recursive(tool_node, file_func_ops, ops, file_func_nodes, visited=set(), depth=0)
+
+
+def _merge_callee_ops_recursive(
+    func_node: ast.FunctionDef,
+    file_func_ops: dict[str, dict[str, list[int]]],
+    ops: dict[str, list[int]],
+    file_func_nodes: dict[str, ast.FunctionDef],
+    visited: set[str],
+    depth: int,
+    max_depth: int = 3,
+) -> None:
+    """Internal recursive implementation of callee op merging."""
+    if depth >= max_depth:
+        return
+
+    for node in _iter_direct_calls(func_node):
         if not isinstance(node, ast.Call):
             continue
         callee = ""
@@ -351,14 +389,26 @@ def _merge_callee_ops(
         elif isinstance(node.func, ast.Attribute):
             callee = node.func.attr  # method name only
 
+        if not callee or callee in visited:
+            continue
+
         callee_ops = file_func_ops.get(callee)
         if not callee_ops:
             continue
+
         call_lineno = getattr(node, "lineno", 0)
         for op_category, lines in callee_ops.items():
             if lines and op_category in ops:
-                # Use the call-site line number so the finding points to the delegation
                 ops[op_category] = ops[op_category] or [call_lineno]
+
+        # Recurse into the callee's own calls
+        callee_node = file_func_nodes.get(callee)
+        if callee_node:
+            visited.add(callee)
+            _merge_callee_ops_recursive(
+                callee_node, file_func_ops, ops, file_func_nodes,
+                visited, depth + 1, max_depth,
+            )
 
 
 def run_l4(file_path: Path) -> list[Finding]:
@@ -378,13 +428,15 @@ def run_l4(file_path: Path) -> list[Finding]:
 
     tools = _extract_mcp_tools(tree)
 
-    # Build a file-level function operation index for depth-2 call resolution.
+    # Build a file-level function operation index for depth-3 call resolution.
     # Maps function_name → ops dict so that when a tool calls another local function
     # we can look up what that function actually does.
     file_func_ops: dict[str, dict[str, list[int]]] = {}
+    file_func_nodes: dict[str, ast.FunctionDef] = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             file_func_ops[node.name] = _analyze_function_operations(node)
+            file_func_nodes[node.name] = node
 
     for tool in tools:
         docstring = tool["docstring"]
@@ -392,7 +444,7 @@ def run_l4(file_path: Path) -> list[Finding]:
         # Analyze actual operations (needed for both docstring and no-docstring paths)
         # Merge direct ops with ops from called local functions (depth=2)
         ops = _analyze_function_operations(tool["node"])
-        _merge_callee_ops(tool["node"], file_func_ops, ops)
+        _merge_callee_ops(tool["node"], file_func_ops, ops, file_func_nodes)
 
         # ─── Check 0: No docstring but performs dangerous operations ───
         # A tool with no description that executes commands / writes files / makes
@@ -569,11 +621,11 @@ def run_l4(file_path: Path) -> list[Finding]:
                 tool_name=tool["name"],
             ))
 
-        # ─── Check: tool accepts raw SQL string AND executes it with dynamic argument ───
-        # Catches: def query(sql: str) → conn.execute(sql, ...) where sql is a Name/variable
-        # This is the mcp-toolkit sqlite_explorer pattern: tool accepts sql param directly.
+        # ─── Check: dynamic SQL execution (f-string or variable, not parameterized) ───
+        # Catches: cursor.execute(f"SELECT ... '{username}'")
+        # L4-009a: any tool that executes dynamic SQL (regardless of param naming)
         if ops["sql_exec"]:
-            # Check if any tool param name suggests it's raw SQL input
+            # Check if any tool param name suggests it's raw SQL input (high confidence)
             sql_params = [p for p in tool.get("params", [])
                           if re.search(r'\b(?:sql|query|statement|stmt)\b', p, re.I)]
             if sql_params:
@@ -595,5 +647,207 @@ def run_l4(file_path: Path) -> list[Finding]:
                     tool_name=tool["name"],
                     confidence=Confidence.MEDIUM,
                 ))
+            else:
+                # Lower confidence: dynamic SQL but param name doesn't suggest SQL input
+                # Still worth flagging — any user param in an f-string SQL is risky
+                findings.append(Finding(
+                    id="MCPX-L4-009",
+                    title=f"Tool '{tool['name']}' executes dynamic SQL (possible injection)",
+                    severity=Severity.MEDIUM,
+                    layer="L4",
+                    file=file_str,
+                    line=ops["sql_exec"][0],
+                    evidence=(
+                        f"DB execute() called with f-string/variable SQL at line(s): {ops['sql_exec']}. "
+                        f"Use parameterized queries (cursor.execute(sql, params)) instead."
+                    ),
+                    owasp_mcp="MCP09",
+                    cia_impact=[CIAImpact.CONFIDENTIALITY, CIAImpact.INTEGRITY],
+                    security_property=SecurityProperty.DATA_ISOLATION,
+                    tool_name=tool["name"],
+                    confidence=Confidence.NEEDS_REVIEW,
+                ))
+
+        # ─── Reverse detection: dangerous op present but description never discloses it ───
+        # Catches attackers who write neutral descriptions ("helper", "assistant", "process")
+        # without triggering the forward checks above (no read-only/compute/no-network claim).
+
+        # Undisclosed file write
+        if (ops["file_write"]
+                and not DESC_DISCLOSES_WRITE.search(docstring)
+                and not CLAIM_READ_ONLY.search(docstring)):  # already covered by L4-001
+            findings.append(Finding(
+                id="MCPX-L4-010",
+                title=f"Tool '{tool['name']}' writes files but description never mentions it",
+                severity=Severity.HIGH,
+                layer="L4",
+                file=file_str,
+                line=ops["file_write"][0],
+                evidence=(
+                    f"Description contains no write-related keywords, "
+                    f"but code writes/modifies files at line(s): {ops['file_write']}"
+                ),
+                owasp_mcp="MCP01",
+                cia_impact=[CIAImpact.INTEGRITY],
+                security_property=SecurityProperty.TASK_ALIGNMENT,
+                tool_name=tool["name"],
+                confidence=Confidence.MEDIUM,
+            ))
+
+        # Undisclosed network call
+        if (ops["network"]
+                and not DESC_DISCLOSES_NETWORK.search(docstring)
+                and not DESC_ACKNOWLEDGES_NETWORK.search(docstring)):
+            findings.append(Finding(
+                id="MCPX-L4-011",
+                title=f"Tool '{tool['name']}' makes network requests but description never mentions it",
+                severity=Severity.HIGH,
+                layer="L4",
+                file=file_str,
+                line=ops["network"][0],
+                evidence=(
+                    f"Description contains no network-related keywords, "
+                    f"but code makes external requests at line(s): {ops['network']}"
+                ),
+                owasp_mcp="MCP09",
+                cia_impact=[CIAImpact.CONFIDENTIALITY],
+                security_property=SecurityProperty.DATA_ISOLATION,
+                tool_name=tool["name"],
+                confidence=Confidence.MEDIUM,
+            ))
+
+        # Undisclosed command execution
+        if (ops["command_exec"]
+                and not DESC_DISCLOSES_COMMAND.search(docstring)
+                and not DESC_ACKNOWLEDGES_COMMANDS.search(docstring)):
+            findings.append(Finding(
+                id="MCPX-L4-012",
+                title=f"Tool '{tool['name']}' executes system commands but description never mentions it",
+                severity=Severity.CRITICAL,
+                layer="L4",
+                file=file_str,
+                line=ops["command_exec"][0],
+                evidence=(
+                    f"Description contains no command-related keywords, "
+                    f"but code spawns processes at line(s): {ops['command_exec']}"
+                ),
+                owasp_mcp="MCP09",
+                cia_impact=[CIAImpact.INTEGRITY, CIAImpact.CONFIDENTIALITY],
+                security_property=SecurityProperty.TASK_ALIGNMENT,
+                tool_name=tool["name"],
+                confidence=Confidence.MEDIUM,
+            ))
+
+    # ─── Module-level dangerous code: class methods, __init__, metaclass hooks ───
+    # Catches: poc37 (metaclass __call__ writes files), poc38 (property getter writes files),
+    # poc39 (__getattribute__ makes network calls), poc35 (import side-effects).
+    # These all execute outside @mcp.tool() but at server startup or on every tool call.
+    findings.extend(_check_module_level_danger(tree, file_str))
+
+    return findings
+
+
+def _check_module_level_danger(tree: ast.AST, file_str: str) -> list[Finding]:
+    """Scan class methods and module-level code for dangerous operations.
+
+    MCP server code runs at import time (module level) and via class instantiation.
+    Backdoors hidden in metaclass __call__, property getters, __init__ methods,
+    or __getattribute__ hooks execute silently, bypassing @mcp.tool() analysis.
+    """
+    findings: list[Finding] = []
+
+    # Dunder methods that execute implicitly and are high-value backdoor sites
+    HIGH_RISK_DUNDERS = {
+        "__init__", "__call__", "__del__", "__getattr__", "__getattribute__",
+        "__setattr__", "__delattr__", "__get__", "__set__", "__enter__", "__exit__",
+    }
+
+    mcp_tool_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for dec in node.decorator_list:
+                if "tool" in ast.dump(dec).lower():
+                    mcp_tool_names.add(node.name)
+
+    # Build file-level ops+nodes index for recursive callee resolution
+    file_func_ops: dict[str, dict[str, list[int]]] = {}
+    file_func_nodes: dict[str, ast.FunctionDef] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            file_func_ops[node.name] = _analyze_function_operations(node)
+            file_func_nodes[node.name] = node
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name in mcp_tool_names:
+            continue  # already covered by per-tool analysis
+
+        is_dunder = node.name in HIGH_RISK_DUNDERS
+        is_property = any(
+            (isinstance(d, ast.Name) and d.id == "property") or
+            (isinstance(d, ast.Attribute) and d.attr in ("getter", "setter"))
+            for d in node.decorator_list
+        )
+        if not (is_dunder or is_property):
+            continue
+
+        # Use recursive callee expansion (depth=3) same as tool analysis
+        ops = _analyze_function_operations(node)
+        _merge_callee_ops(node, file_func_ops, ops, file_func_nodes)
+
+        if ops["file_write"]:
+            findings.append(Finding(
+                id="MCPX-L4-013",
+                title=f"Implicit hook '{node.name}' writes files (executes outside tool boundary)",
+                severity=Severity.HIGH,
+                layer="L4",
+                file=file_str,
+                line=ops["file_write"][0],
+                evidence=(
+                    f"Method '{node.name}' (dunder/property) writes files at "
+                    f"line(s): {ops['file_write']}. Executes on class instantiation or attribute access."
+                ),
+                owasp_mcp="MCP01",
+                cia_impact=[CIAImpact.INTEGRITY],
+                security_property=SecurityProperty.TASK_ALIGNMENT,
+                confidence=Confidence.MEDIUM,
+            ))
+
+        if ops["network"]:
+            findings.append(Finding(
+                id="MCPX-L4-014",
+                title=f"Implicit hook '{node.name}' makes network requests (executes outside tool boundary)",
+                severity=Severity.HIGH,
+                layer="L4",
+                file=file_str,
+                line=ops["network"][0],
+                evidence=(
+                    f"Method '{node.name}' (dunder/property) makes network calls at "
+                    f"line(s): {ops['network']}. Executes on class instantiation or attribute access."
+                ),
+                owasp_mcp="MCP09",
+                cia_impact=[CIAImpact.CONFIDENTIALITY],
+                security_property=SecurityProperty.DATA_ISOLATION,
+                confidence=Confidence.MEDIUM,
+            ))
+
+        if ops["command_exec"]:
+            findings.append(Finding(
+                id="MCPX-L4-015",
+                title=f"Implicit hook '{node.name}' executes commands (executes outside tool boundary)",
+                severity=Severity.CRITICAL,
+                layer="L4",
+                file=file_str,
+                line=ops["command_exec"][0],
+                evidence=(
+                    f"Method '{node.name}' (dunder/property) spawns processes at "
+                    f"line(s): {ops['command_exec']}. Executes on class instantiation or attribute access."
+                ),
+                owasp_mcp="MCP09",
+                cia_impact=[CIAImpact.INTEGRITY, CIAImpact.CONFIDENTIALITY],
+                security_property=SecurityProperty.TASK_ALIGNMENT,
+                confidence=Confidence.MEDIUM,
+            ))
 
     return findings

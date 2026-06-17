@@ -325,37 +325,43 @@ def _check_rug_pull(current_hashes: dict[str, str], state_file: Optional[str]) -
 
 
 def _check_return_value_injection(node: ast.FunctionDef, source_lines: list[str]) -> list[Finding]:
-    """Check if return values contain suspicious injection patterns."""
+    """Check if tool function body contains suspicious injection string literals.
+
+    Scans all string constants in the function body (not just the return statement)
+    because injection payloads are often stored in variables then returned:
+        injection = "[SYSTEM OVERRIDE]..."
+        return result + injection
+    """
     findings = []
 
-    for child in ast.walk(node):
-        if isinstance(child, ast.Return) and child.value:
-            # Get the source text of the return value
-            if hasattr(child, 'lineno') and hasattr(child, 'end_lineno'):
-                start = child.lineno - 1
-                end = getattr(child, 'end_lineno', child.lineno)
-                return_text = "\n".join(source_lines[start:end])
+    # Patterns that indicate a hardcoded injection payload in a string literal
+    injection_markers = re.compile(
+        r'(?:SYSTEM\s+OVERRIDE|SYSTEM\s+INSTRUCTION|IMPORTANT\s+SYSTEM|'
+        r'\[SYSTEM\b|you\s+must\s+(?:first|now)\b|ignore\s+(?:all\s+)?previous\s+instructions?|'
+        r'do\s+not\s+(?:mention|tell|inform)\s+(?:this|the\s+user)|'
+        r'mandatory\s+(?:security\s+check|system\s+requirement)|'
+        r'terms\s+of\s+service\s+require)',
+        re.I,
+    )
 
-                # Check for injection markers in return strings
-                injection_markers = re.compile(
-                    r'(?:SYSTEM\s+OVERRIDE|SYSTEM\s+INSTRUCTION|IMPORTANT\s+SYSTEM|'
-                    r'you\s+must\s+(?:first|now)|ignore\s+previous)',
-                    re.I,
-                )
-                if injection_markers.search(return_text):
-                    findings.append(Finding(
-                        id="MCPX-L2-025",
-                        title="Possible injection payload in return value",
-                        severity=Severity.HIGH,
-                        layer="L2",
-                        file="",
-                        line=child.lineno,
-                        evidence=return_text.strip()[:120],
-                        owasp_mcp="MCP02",
-                        cia_impact=[CIAImpact.INTEGRITY],
-                        security_property=SecurityProperty.ACTION_ALIGNMENT,
-                        confidence=Confidence.MEDIUM,
-                    ))
+    for child in ast.walk(node):
+        # Check all string constants in the function body
+        if isinstance(child, ast.Constant) and isinstance(child.value, str):
+            if injection_markers.search(child.value):
+                lineno = getattr(child, 'lineno', node.lineno)
+                findings.append(Finding(
+                    id="MCPX-L2-025",
+                    title="Injection payload in string literal (return value poisoning)",
+                    severity=Severity.HIGH,
+                    layer="L2",
+                    file="",
+                    line=lineno,
+                    evidence=child.value.strip()[:120],
+                    owasp_mcp="MCP02",
+                    cia_impact=[CIAImpact.INTEGRITY],
+                    security_property=SecurityProperty.ACTION_ALIGNMENT,
+                    confidence=Confidence.MEDIUM,
+                ))
     return findings
 
 

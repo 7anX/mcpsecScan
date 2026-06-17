@@ -256,6 +256,20 @@ DESC_ACKNOWLEDGES_COMMANDS = re.compile(
     re.I,
 )
 
+# ── Reverse detection keyword sets ───────────────────────────────────────────
+DESC_DISCLOSES_WRITE = re.compile(
+    r'\b(?:writ|modif|creat|delet|updat|append|remov|chang|sav|stor|overwrite|generat)\w*\b',
+    re.I,
+)
+DESC_DISCLOSES_NETWORK = re.compile(
+    r'\b(?:fetch|request|call|connect|send|upload|download|post|get|http|api|url|endpoint|network|internet|external|remote)\w*\b',
+    re.I,
+)
+DESC_DISCLOSES_COMMAND = re.compile(
+    r'\b(?:execut|run|invoke|call|spawn|launch|command|shell|subprocess|process|script|bash|sh|cmd|terminal)\w*\b',
+    re.I,
+)
+
 
 # ── Tool extraction from source ───────────────────────────────────────────────
 
@@ -484,6 +498,72 @@ def run_l4_js(file_path: Path) -> list[Finding]:
                 owasp_mcp="MCP09",
                 cia_impact=[CIAImpact.CONFIDENTIALITY, CIAImpact.INTEGRITY],
                 security_property=SecurityProperty.DATA_ISOLATION,
+                tool_name=name,
+                confidence=Confidence.MEDIUM,
+            ))
+
+        # ── Reverse detection: dangerous op present but description never discloses it ──
+        # Catches neutral descriptions like "helper tool", "process data", "assistant"
+
+        if (ops["file_write"]
+                and not DESC_DISCLOSES_WRITE.search(desc)
+                and not CLAIM_READ_ONLY.search(desc)):
+            findings.append(Finding(
+                id="MCPX-L4-010",
+                title=f"JS tool '{name}' writes files but description never mentions it",
+                severity=Severity.HIGH,
+                layer="L4",
+                file=file_str,
+                line=0,
+                evidence=(
+                    f"Description contains no write-related keywords, "
+                    f"but handler writes files at relative lines: {ops['file_write']}"
+                ),
+                owasp_mcp="MCP01",
+                cia_impact=[CIAImpact.INTEGRITY],
+                security_property=SecurityProperty.TASK_ALIGNMENT,
+                tool_name=name,
+                confidence=Confidence.MEDIUM,
+            ))
+
+        if (ops["network"]
+                and not DESC_DISCLOSES_NETWORK.search(desc)
+                and not DESC_ACKNOWLEDGES_NETWORK.search(desc)):
+            findings.append(Finding(
+                id="MCPX-L4-011",
+                title=f"JS tool '{name}' makes network requests but description never mentions it",
+                severity=Severity.HIGH,
+                layer="L4",
+                file=file_str,
+                line=0,
+                evidence=(
+                    f"Description contains no network-related keywords, "
+                    f"but handler makes requests at relative lines: {ops['network']}"
+                ),
+                owasp_mcp="MCP09",
+                cia_impact=[CIAImpact.CONFIDENTIALITY],
+                security_property=SecurityProperty.DATA_ISOLATION,
+                tool_name=name,
+                confidence=Confidence.MEDIUM,
+            ))
+
+        if (ops["command_exec"]
+                and not DESC_DISCLOSES_COMMAND.search(desc)
+                and not DESC_ACKNOWLEDGES_COMMANDS.search(desc)):
+            findings.append(Finding(
+                id="MCPX-L4-012",
+                title=f"JS tool '{name}' executes system commands but description never mentions it",
+                severity=Severity.CRITICAL,
+                layer="L4",
+                file=file_str,
+                line=0,
+                evidence=(
+                    f"Description contains no command-related keywords, "
+                    f"but handler spawns processes at relative lines: {ops['command_exec']}"
+                ),
+                owasp_mcp="MCP09",
+                cia_impact=[CIAImpact.INTEGRITY, CIAImpact.CONFIDENTIALITY],
+                security_property=SecurityProperty.TASK_ALIGNMENT,
                 tool_name=name,
                 confidence=Confidence.MEDIUM,
             ))
