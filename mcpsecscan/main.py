@@ -103,6 +103,7 @@ def cli():
         ai_key      = _flag_value(args, "--ai-key",   "")
         ai_model    = _flag_value(args, "--ai-model", "gpt-4o-mini")
         ai_timeout  = int(_flag_value(args, "--ai-timeout", "60"))
+        ai_mode     = _flag_value(args, "--ai-mode",  "basic")  # "basic" | "deep"
 
         # output format
         fmt = _flag_value(args, "--format", "json")
@@ -114,6 +115,7 @@ def cli():
         triage_report = None
         if ai_explain:
             from mcpsecscan.ai_triage import triage, is_available
+            from pathlib import Path as _Path
             if not is_available():
                 print(
                     "ERROR: --ai-explain requires httpx. "
@@ -121,16 +123,29 @@ def cli():
                     file=sys.stderr,
                 )
                 sys.exit(2)
+            mode_label = f"mode={ai_mode}, " if ai_mode != "basic" else ""
             print(
-                f"Running AI triage (model={ai_model}, url={ai_url}) ...",
+                f"Running AI triage ({mode_label}model={ai_model}, url={ai_url}) ...",
                 file=sys.stderr,
             )
+            # Collect py_files for deep mode
+            py_files_for_deep = None
+            if ai_mode == "deep":
+                target_path = _Path(target)
+                if target_path.is_file():
+                    py_files_for_deep = [target_path]
+                else:
+                    py_files_for_deep = sorted(
+                        f for f in target_path.rglob("*.py") if f.is_file()
+                    )
             triage_report = triage(
                 result,
                 api_url=ai_url,
                 api_key=ai_key,
                 model=ai_model,
                 timeout=ai_timeout,
+                mode=ai_mode,
+                py_files=py_files_for_deep,
             )
             # Merge triage data into result dict for JSON output
             result_dict["ai_triage"] = {
@@ -169,11 +184,25 @@ def cli():
     # ── web subcommand (default) ──────────────────────────────────────────────
     else:
         import uvicorn
+        import socket
 
         port = 8000
         if "--port" in args:
             idx = args.index("--port")
             port = int(args[idx + 1])
+
+        # Check port availability before starting uvicorn
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            in_use = s.connect_ex(("127.0.0.1", port)) == 0
+        if in_use:
+            print(
+                f"ERROR: Port {port} is already in use.\n"
+                f"  Use a different port:  mcpsecscan --port 9090\n"
+                f"  Or stop the process using port {port} and retry.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
         print(f"Starting mcpsecscan Web UI at http://localhost:{port}")
         print("Open your browser to start scanning.")

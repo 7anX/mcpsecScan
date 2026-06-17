@@ -81,6 +81,14 @@ class ScanResult:
     scan_time_ms: int = 0
     suite_version: str = "0.2.0"
     errors: list[str] = field(default_factory=list)
+    analysis_limits: list[str] = field(default_factory=lambda: [
+        "Cross-file import chains: malicious code in third-party or non-local imports is not analyzed.",
+        "Runtime composition risk: two individually-innocent tools that become dangerous when an AI agent combines them may not be detected unless both appear in the same server.",
+        "Race conditions (TOCTOU): time-of-check/time-of-use vulnerabilities require runtime monitoring.",
+        "Data-semantic leaks: returning os.environ or sensitive data in tool output without a dangerous API call is not detected (no dangerous sink present).",
+        "Obfuscated/encrypted payloads: base64 blocks are flagged (L1-025) but decoded content is not executed or analyzed.",
+        "Dynamic import side-effects: __init__.py poison in third-party packages is outside the static analysis scope.",
+    ])
 
     @property
     def summary(self) -> dict[str, int]:
@@ -97,4 +105,5 @@ class ScanResult:
             "summary": self.summary,
             "findings": [f.to_dict() for f in self.findings],
             "errors": self.errors,
+            "analysis_limits": self.analysis_limits,
         }
